@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>СТО München — CRM</title>
+  <meta name="description" content="CRM-система для управления автосервисом München" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+
+<body>
+  <div id="app">
+
+    <!-- Mobile Topbar (visible only on small screens) -->
+    <header id="mobile-topbar" class="mobile-topbar">
+      <button id="btn-mobile-menu" class="btn-mobile-menu" aria-label="Открыть меню">
+        <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none">
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+      </button>
+      <div class="mobile-brand">
+        <svg width="22" height="22" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="28" height="28" rx="8" fill="#f59e0b" />
+          <path d="M7 18l3-8h8l3 8" stroke="#0f1117" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          <circle cx="10" cy="19.5" r="1.5" fill="#0f1117" />
+          <circle cx="18" cy="19.5" r="1.5" fill="#0f1117" />
+          <path d="M5 14h18" stroke="#0f1117" stroke-width="1.5" stroke-linecap="round" />
+        </svg>
+        <span class="mobile-brand-name">München СТО</span>
+      </div>
+      <div class="mobile-user-avatar" id="mobile-user-avatar">?</div>
+    </header>
+
+    <!-- Mobile Sidebar Backdrop Overlay -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+
+    <!-- Sidebar navigation -->
+    <aside id="sidebar" class="sidebar hidden">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="28" height="28" rx="8" fill="#f59e0b" />
+            <path d="M7 18l3-8h8l3 8" stroke="#0f1117" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round" />
+            <circle cx="10" cy="19.5" r="1.5" fill="#0f1117" />
+            <circle cx="18" cy="19.5" r="1.5" fill="#0f1117" />
+            <path d="M5 14h18" stroke="#0f1117" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+          <div>
+            <div class="sidebar-brand">München СТО</div>
+            <div class="sidebar-tagline">CRM система</div>
+          </div>
+        </div>
+        <button class="sidebar-mobile-close" id="btn-sidebar-close" aria-label="Закрыть меню">✕</button>
+      </div>
+
+      <nav class="sidebar-nav" id="sidebar-nav">
+        <a href="#/orders" class="nav-item" id="nav-orders" data-route="/orders">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z"
+              clip-rule="evenodd" />
+          </svg>
+          <span>Заказ-наряды</span>
+        </a>
+        <a href="#/clients" class="nav-item" id="nav-clients" data-route="/clients">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
+            <path
+              d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
+          </svg>
+          <span>Клиенты</span>
+        </a>
+        <a href="#/employees" class="nav-item" id="nav-employees" data-route="/employees">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd" />
+          </svg>
+          <span>Сотрудники</span>
+        </a>
+        <a href="#/services" class="nav-item" id="nav-services" data-route="/services">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.532 1.532 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.532 1.532 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"
+              clip-rule="evenodd" />
+          </svg>
+          <span>Услуги и Прайс</span>
+        </a>
+
+        <a href="#/analytics" class="nav-item nav-item--owner hidden" id="nav-analytics" data-route="/analytics">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
+            <path
+              d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" />
+          </svg>
+          <span>Аналитика</span>
+          <span class="nav-badge">Владелец</span>
+        </a>
+
+        <a href="#/roles" class="nav-item nav-item--owner hidden" id="nav-roles" data-route="/roles">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M10 1a4.5 4.5 0 00-4.5 4.5V9H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-.5V5.5A4.5 4.5 0 0010 1zm3 8V5.5a3 3 0 10-6 0V9h6z" clip-rule="evenodd" />
+          </svg>
+          <span>Роли и права</span>
+          <span class="nav-badge">Владелец</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-info" id="user-info">
+          <div class="user-avatar" id="user-avatar">?</div>
+          <div class="user-details">
+            <div class="user-name" id="user-name">—</div>
+            <div class="user-role" id="user-role">—</div>
+          </div>
+        </div>
+        <button class="btn-logout" id="btn-logout" title="Выйти">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18">
+            <path fill-rule="evenodd"
+              d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z"
+              clip-rule="evenodd" />
+          </svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main content area -->
+    <main id="main-content" class="main-content">
+      <!-- Content rendered here by JS -->
+    </main>
+
+  </div>
+
+  <!-- Modal overlay -->
+  <div id="modal-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal" id="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-title">Форма</h3>
+        <button class="modal-close" id="modal-close" aria-label="Закрыть">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20">
+            <path fill-rule="evenodd"
+              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+              clip-rule="evenodd" />
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body" id="modal-body">
+        <!-- Dynamic content -->
+      </div>
+      <div class="modal-footer" id="modal-footer">
+        <button class="btn btn-ghost" id="modal-cancel">Отмена</button>
+        <button class="btn btn-primary" id="modal-submit">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast notifications -->
+  <div id="toast-container" aria-live="polite"></div>
+
+  <!-- JS modules -->
+  <script src="/static/js/permissions.js"></script>
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/auth.js"></script>
+  <script src="/static/js/clients.js"></script>
+  <script src="/static/js/vehicles.js"></script>
+  <script src="/static/js/service-categories.js"></script>
+  <script src="/static/js/services.js"></script>
+  <script src="/static/js/orders.js"></script>
+  <script src="/static/js/employees.js"></script>
+  <script src="/static/js/analytics.js"></script>
+  <script src="/static/js/roles.js"></script>
+
+  <script>
+    // Boot the app after all scripts loaded
+    App.init();
+  </script>
+</body>
+
+</html>

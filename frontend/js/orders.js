@@ -1,0 +1,1492 @@
+/**
+ * orders.js — Orders list, order detail, parts, comments, and print form.
+ * Tabs: Работы / Запчасти и материалы
+ * Drawer: Комментарии / Дефектовка (chat-style with images)
+ * Print: DOCX template upload & generation
+ */
+
+const ORDER_STATUSES = [
+  { value: 'new', label: 'Новый' },
+  { value: 'in_progress', label: 'В работе' },
+  { value: 'done', label: 'Готов' },
+  { value: 'issued', label: 'Выдан' },
+  { value: 'paid', label: 'Оплачен' },
+];
+
+const ITEM_STATUSES = [
+  { value: 'pending', label: 'Ожидает' },
+  { value: 'in_progress', label: 'В работе' },
+  { value: 'done', label: 'Выполнено' },
+];
+
+// ─── Orders List ──────────────────────────────────────────────────────────────
+async function renderOrders() {
+  const hash = window.location.hash.slice(1);
+  const qIdx = hash.indexOf('?');
+  const params = new URLSearchParams(qIdx >= 0 ? hash.slice(qIdx + 1) : '');
+
+  const initialFilters = {
+    status: params.get('status') || '',
+    date_from: params.get('date_from') || '',
+    date_to: params.get('date_to') || '',
+    client_id: params.get('client_id') || '',
+  };
+
+  App.setContent(`
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Заказ-наряды</h1>
+        <p class="page-subtitle">Все работы вашего автосервиса</p>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-secondary filter-toggle-btn" id="btn-toggle-filters" onclick="toggleOrderFilters()">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
+            <path fill-rule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clip-rule="evenodd"/>
+          </svg>
+          <span>Фильтры</span>
+          <span id="filters-badge" class="badge-filter-count hidden">0</span>
+        </button>
+        <button class="btn btn-primary" id="btn-new-order">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd"/></svg>
+          + Новый заказ
+        </button>
+      </div>
+    </div>
+    <div class="page-body">
+      <div class="filter-bar filter-collapse" id="orders-filter-bar">
+        <select class="form-control filter-select" id="filter-status">
+          <option value="">Все статусы</option>
+          ${ORDER_STATUSES.map(s => `<option value="${s.value}" ${params.get('status') === s.value ? 'selected' : ''}>${s.label}</option>`).join('')}
+        </select>
+        <input type="date" class="form-control" id="filter-date-from" style="max-width:160px"
+          value="${params.get('date_from') || ''}" title="Дата с" />
+        <input type="date" class="form-control" id="filter-date-to" style="max-width:160px"
+          value="${params.get('date_to') || ''}" title="Дата по" />
+        <button class="btn btn-secondary" id="btn-filter-apply">Применить</button>
+        <button class="btn btn-ghost" id="btn-filter-reset">Сбросить</button>
+      </div>
+      <div id="orders-table-wrap">${App.spinner()}</div>
+    </div>
+  `);
+
+  document.getElementById('btn-new-order').addEventListener('click', createInstantOrder);
+  document.getElementById('btn-filter-apply').addEventListener('click', applyOrderFilters);
+  document.getElementById('btn-filter-reset').addEventListener('click', () => {
+    document.getElementById('filter-status').value = '';
+    document.getElementById('filter-date-from').value = '';
+    document.getElementById('filter-date-to').value = '';
+    loadOrders({});
+  });
+
+  await loadOrders(initialFilters);
+}
+
+function toggleOrderFilters() {
+  const bar = document.getElementById('orders-filter-bar');
+  if (bar) bar.classList.toggle('show');
+}
+
+function updateFilterBadge(filters) {
+  let count = 0;
+  if (filters.status) count++;
+  if (filters.date_from) count++;
+  if (filters.date_to) count++;
+  const badge = document.getElementById('filters-badge');
+  if (badge) {
+    badge.textContent = count;
+    badge.classList.toggle('hidden', count === 0);
+  }
+}
+
+/** Instantly creates an empty draft order and opens its page */
+async function createInstantOrder() {
+  try {
+    const newOrder = await App.api('/orders/', {
+      method: 'POST',
+      body: { client_id: null, vehicle_id: null, comment: '' },
+    });
+    App.toast('Новый заказ-наряд создан!');
+    App.navigate(`/orders/${newOrder.id}`);
+  } catch (err) {
+    App.toast(err.message, 'error');
+  }
+}
+
+function applyOrderFilters() {
+  const status = document.getElementById('filter-status').value;
+  const date_from = document.getElementById('filter-date-from').value;
+  const date_to = document.getElementById('filter-date-to').value;
+  loadOrders({ status, date_from, date_to });
+}
+
+async function loadOrders(filters = {}) {
+  const wrap = document.getElementById('orders-table-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = App.spinner();
+
+  updateFilterBadge(filters);
+
+  try {
+    const qs = new URLSearchParams();
+    if (filters.status) qs.append('status', filters.status);
+    if (filters.date_from) qs.append('date_from', filters.date_from);
+    if (filters.date_to) qs.append('date_to', filters.date_to);
+    if (filters.client_id) qs.append('client_id', filters.client_id);
+
+    const orders = await App.api(`/orders/?${qs.toString()}`);
+
+    if (!orders || orders.length === 0) {
+      wrap.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">📋</div>
+          <h3>Заказ-нарядов нет</h3>
+          <p>Создайте первый заказ-наряд или измените фильтры</p>
+          <button class="btn btn-primary" onclick="createInstantOrder()">+ Новый заказ</button>
+        </div>`;
+      return;
+    }
+
+    wrap.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>№</th>
+              <th>Дата</th>
+              <th>Клиент</th>
+              <th>Автомобиль</th>
+              <th>Статус</th>
+              <th>Сумма</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${orders.map(o => {
+      const hasClient = !!o.client;
+      const hasVehicle = !!o.vehicle;
+      const isDraft = !hasClient || !hasVehicle;
+
+      return `
+                <tr class="clickable-row ${isDraft ? 'is-draft' : ''}" onclick="App.navigate('/orders/${o.id}')">
+                  <td class="td-primary">#${o.id}</td>
+                  <td class="text-sm">${App.formatDate(o.created_at)}</td>
+                  <td>
+                    ${hasClient ? `
+                      <div style="font-weight:600;color:var(--text-primary)">
+                        ${App.escHtml(o.client.full_name)}
+                      </div>
+                      <div class="text-muted text-sm">${App.escHtml(o.client.phone)}</div>
+                    ` : '<span class="badge badge-danger" style="background:rgba(239,68,68,0.2);color:#fca5a5">⚠️ Выберите клиента</span>'}
+                  </td>
+                  <td class="text-sm">
+                    ${hasVehicle ? App.vehicleLabel(o.vehicle) : '<span class="badge badge-danger" style="background:rgba(239,68,68,0.2);color:#fca5a5">⚠️ Выберите авто</span>'}
+                  </td>
+                  <td>${App.statusBadge(o.status)}</td>
+                  <td class="td-primary font-bold">${App.formatMoney(o.total_amount)}</td>
+                  <td>
+                    <button class="btn btn-sm ${isDraft ? 'btn-primary' : 'btn-secondary'}">
+                      ${isDraft ? 'Заполнить' : 'Открыть'}
+                    </button>
+                  </td>
+                </tr>
+              `;
+    }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch (err) {
+    wrap.innerHTML = `<div class="empty-state"><p class="text-danger">Ошибка: ${App.escHtml(err.message)}</p></div>`;
+  }
+}
+
+// ─── Order Detail / Form ──────────────────────────────────────────────────────
+async function renderOrderDetail(id) {
+  App.setContent(App.spinner());
+  try {
+    const [order, clients, employees] = await Promise.all([
+      App.api(`/orders/${id}`),
+      App.api('/clients/'),
+      App.api('/employees/'),
+    ]);
+    if (!order) return;
+
+    let clientVehicles = [];
+    if (order.client_id) {
+      clientVehicles = await App.api(`/vehicles/?client_id=${order.client_id}`).catch(() => []);
+    }
+
+    _renderOrderDetailHtml(order, clients, clientVehicles, employees);
+  } catch (err) {
+    App.setContent(`<div class="page-body"><p class="text-danger">Ошибка: ${App.escHtml(err.message)}</p></div>`);
+  }
+}
+
+function _renderOrderDetailHtml(order, clients, vehicles, employees) {
+  const empMap = {};
+  (employees || []).forEach(e => empMap[e.id] = e);
+
+  const needsClient = !order.client_id;
+  const needsVehicle = !order.vehicle_id;
+  const isUnassigned = needsClient || needsVehicle;
+
+  const servicesTotal = order.services_total ?? order.items.reduce((s, i) => s + i.price, 0);
+  const partsTotal = order.parts_total ?? (order.parts || []).reduce((s, p) => s + p.price * p.qty, 0);
+  const totalAmount = order.total_amount ?? (servicesTotal + partsTotal);
+
+  App.setContent(`
+    <div class="page-header">
+      <div>
+        <div class="back-link" onclick="App.navigate('/orders')">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path fill-rule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clip-rule="evenodd"/></svg>
+          Все заказ-наряды
+        </div>
+        <h1 class="page-title">Заказ-наряд #${order.id}</h1>
+        <p class="page-subtitle">Создан ${App.formatDate(order.created_at)}</p>
+      </div>
+      <div class="flex gap-2">
+        ${Permissions.can(App.user?.role, 'order.comments') ? `
+        <button class="btn btn-sm btn-secondary" id="btn-comments" onclick="openCommentsDrawer(${order.id})">
+          💬 Комментарии${(order.comments && order.comments.length > 0) ? ` <span style="background:var(--accent);color:#000;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${order.comments.length}</span>` : ''}
+        </button>` : ''}
+        <button class="btn btn-sm btn-secondary" id="btn-print" onclick="openPrintModal(${order.id})">
+          🖨 Печать
+        </button>
+        ${Permissions.can(App.user?.role, 'order.share') ? `
+        <button class="btn btn-sm btn-secondary" id="btn-share" onclick="shareOrder(${order.id})" title="Поделиться с клиентом">
+          🔗 Поделиться
+        </button>` : ''}
+        ${Permissions.can(App.user?.role, 'order.delete') ? `
+        <button class="btn btn-danger btn-sm" onclick="deleteOrder(${order.id})">Удалить заказ</button>` : ''}
+      </div>
+    </div>
+
+    <div class="page-body">
+
+      <!-- Prominent Warning Banner if Client or Vehicle is missing -->
+      ${isUnassigned ? `
+        <div style="background:rgba(239,68,68,0.15);border:2px dashed #ef4444;border-radius:var(--radius-md);padding:16px 20px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:16px">
+          <div class="flex items-center gap-3">
+            <span style="font-size:24px">⚠️</span>
+            <div>
+              <strong style="color:#fca5a5;font-size:15px">Внимание! Необходимо привязать Клиента и Автомобиль</strong>
+              <div class="text-sm text-muted" style="margin-top:2px">Для полноценной работы с заказом выберите клиента и его авто из списка или создайте их прямо здесь.</div>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
+      <div class="detail-grid">
+        <!-- Left Column -->
+        <div>
+
+          <!-- Order Settings Card -->
+          <div class="card mb-4" style="${isUnassigned ? 'border-color:#ef4444;box-shadow:0 0 0 2px rgba(239,68,68,0.2)' : ''}">
+            <div class="card-header">
+              <span class="card-title">Данные клиента и автомобиля</span>
+              <div class="flex gap-2 align-items-center">
+                <span class="text-sm">Статус:</span>
+                <select class="form-control" id="order-status-select" style="width:auto;padding:4px 10px;font-size:13px">
+                  ${ORDER_STATUSES.map(s => `
+                    <option value="${s.value}" ${order.status === s.value ? 'selected' : ''}>${s.label}</option>
+                  `).join('')}
+                </select>
+                <button class="btn btn-sm btn-primary" id="btn-save-status">Сменить</button>
+              </div>
+            </div>
+
+            <div class="card-body">
+              <!-- Client Selection -->
+              <div class="form-group mb-4" style="${needsClient ? 'background:rgba(239,68,68,0.1);padding:12px;border-radius:var(--radius-sm);border:1px solid rgba(239,68,68,0.3)' : ''}">
+                <label>
+                  Клиент <span class="required">*</span>
+                  ${needsClient ? '<span style="color:#fca5a5;margin-left:6px;font-weight:700">(Выберите или создайте нового)</span>' : ''}
+                </label>
+                <div class="flex gap-2">
+                  <select class="form-control" id="select-order-client" onchange="onOrderClientChanged(${order.id}, this.value)">
+                    <option value="">— Выберите клиента —</option>
+                    ${clients.map(c => `
+                      <option value="${c.id}" ${order.client_id === c.id ? 'selected' : ''}>
+                        ${App.escHtml(c.full_name)} (${App.escHtml(c.phone)})
+                      </option>
+                    `).join('')}
+                  </select>
+                  <button class="btn btn-secondary" onclick="inlineCreateClient(${order.id})" style="flex-shrink:0">
+                    + Новый клиент
+                  </button>
+                </div>
+              </div>
+
+              <!-- Vehicle Selection -->
+              <div class="form-group mb-4" style="${needsVehicle ? 'background:rgba(239,68,68,0.1);padding:12px;border-radius:var(--radius-sm);border:1px solid rgba(239,68,68,0.3)' : ''}">
+                <label>
+                  Автомобиль <span class="required">*</span>
+                  ${needsVehicle ? '<span style="color:#fca5a5;margin-left:6px;font-weight:700">(Выберите или добавьте авто)</span>' : ''}
+                </label>
+                <div class="flex gap-2">
+                  <select class="form-control" id="select-order-vehicle" onchange="onOrderVehicleChanged(${order.id}, this.value)" ${!order.client_id ? 'disabled' : ''}>
+                    <option value="">${!order.client_id ? '— Сначала выберите клиента —' : '— Выберите автомобиль —'}</option>
+                    ${vehicles.map(v => `
+                      <option value="${v.id}" ${order.vehicle_id === v.id ? 'selected' : ''}>
+                        ${App.vehicleLabel(v)}
+                      </option>
+                    `).join('')}
+                  </select>
+                  <button class="btn btn-secondary" onclick="inlineCreateVehicle(${order.id}, ${order.client_id})" ${!order.client_id ? 'disabled title="Сначала выберите клиента"' : ''} style="flex-shrink:0">
+                    + Добавить авто
+                  </button>
+                </div>
+              </div>
+
+              <!-- Totals breakdown -->
+              <div class="order-totals">
+                <div class="order-totals-row">
+                  <span class="label">🔧 Сумма работ</span>
+                  <span class="value">${App.formatMoney(servicesTotal)}</span>
+                </div>
+                <div class="order-totals-row">
+                  <span class="label">🔩 Сумма запчастей</span>
+                  <span class="value">${App.formatMoney(partsTotal)}</span>
+                </div>
+                <div class="order-totals-row total">
+                  <span class="label">Итого</span>
+                  <span class="value">${App.formatMoney(totalAmount)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Works & Parts Tabbed Card -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Состав заказа</span>
+              <div id="tab-actions" class="flex gap-2"></div>
+            </div>
+
+            <!-- Tab navigation -->
+            <div class="card-tabs">
+              <div class="card-tab active" id="tab-works" onclick="switchOrderTab('works', ${order.id}, '${order.vehicle?.brand || ''}', '${order.vehicle?.model || ''}')">
+                🔧 Работы <span style="font-size:11px;opacity:.7">(${order.items.length})</span>
+              </div>
+              <div class="card-tab" id="tab-parts" onclick="switchOrderTab('parts', ${order.id}, '${order.vehicle?.brand || ''}', '${order.vehicle?.model || ''}')">
+                🔩 Запчасти и материалы <span style="font-size:11px;opacity:.7">(${(order.parts || []).length})</span>
+              </div>
+            </div>
+
+            <!-- Tab: Работы -->
+            <div id="tab-pane-works" class="tab-pane active">
+              <div id="items-wrap">
+                ${_renderItemsTable(order.items, order.id, empMap, order.vehicle?.brand || '', order.vehicle?.model || '')}
+              </div>
+            </div>
+
+            <!-- Tab: Запчасти -->
+            <div id="tab-pane-parts" class="tab-pane">
+              <div id="parts-wrap">
+                ${_renderPartsTable(order.parts || [], order.id)}
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Right Column: History -->
+        <div>
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">История статусов</span>
+            </div>
+            <div class="card-body">
+              ${order.status_history.length === 0
+      ? '<p class="text-muted text-sm">История пуста</p>'
+      : order.status_history.slice().reverse().map(h => `
+                  <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:12px">
+                    <div style="width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:5px;flex-shrink:0"></div>
+                    <div>
+                      ${App.statusBadge(h.status)}
+                      <div class="text-muted text-sm" style="margin-top:3px">${App.formatDate(h.changed_at)}</div>
+                    </div>
+                  </div>
+                `).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  // Set initial tab actions
+  _setTabActions('works', order.id, order.vehicle?.brand || '', order.vehicle?.model || '', order.vehicle);
+
+  // Event handlers
+  document.getElementById('btn-save-status').addEventListener('click', async () => {
+    const newStatus = document.getElementById('order-status-select').value;
+    try {
+      await App.api(`/orders/${order.id}`, { method: 'PUT', body: { status: newStatus } });
+      App.toast('Статус обновлён');
+      renderOrderDetail(order.id);
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
+  });
+}
+
+// ─── Tab switching ────────────────────────────────────────────────────────────
+function switchOrderTab(tab, orderId, brand, model) {
+  // Toggle tabs
+  document.querySelectorAll('.card-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+
+  document.getElementById(`tab-${tab}`).classList.add('active');
+  document.getElementById(`tab-pane-${tab}`).classList.add('active');
+
+  // Update action buttons
+  const vehicleEl = document.getElementById('select-order-vehicle');
+  const vehicleExists = vehicleEl && vehicleEl.value;
+  _setTabActions(tab, orderId, brand, model, vehicleExists);
+}
+
+function _setTabActions(tab, orderId, brand, model, vehicle) {
+  const actionsEl = document.getElementById('tab-actions');
+  if (!actionsEl) return;
+
+  if (tab === 'works') {
+    actionsEl.innerHTML = `
+      ${vehicle ? `
+      <button class="btn btn-sm btn-secondary" onclick="recalcOrderPrices(${orderId})" title="Пересчитать цены позиций из справочника под текущий автомобиль">
+        ↻ Пересчитать цены
+      </button>` : ''}
+      <button class="btn btn-sm btn-primary" onclick="showItemModal(${orderId}, null, '${brand}', '${model}')">
+        + Добавить работу
+      </button>
+    `;
+  } else {
+    actionsEl.innerHTML = `
+      <button class="btn btn-sm btn-primary" onclick="showPartModal(${orderId}, null)">
+        + Добавить запчасть
+      </button>
+    `;
+  }
+}
+
+// ─── Items Table ──────────────────────────────────────────────────────────────
+function _renderItemsTable(items, orderId, empMap, brand, model) {
+  if (!items || items.length === 0) {
+    return `<div class="empty-state" style="padding:30px">
+      <p class="text-muted">Работы не добавлены. Нажмите «+ Добавить работу».</p>
+    </div>`;
+  }
+  return `
+    <div class="table-wrap" style="border:none;border-radius:0">
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th>Наименование работы</th>
+            <th>Исполнитель</th>
+            <th>Цена (₸)</th>
+            <th>Статус</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.map(item => `
+            <tr>
+              <td class="td-primary">${App.escHtml(item.work_name)}</td>
+              <td class="text-sm">${item.employee ? App.escHtml(item.employee.full_name) : '<span class="text-muted">—</span>'}</td>
+              <td class="font-bold">${App.formatMoney(item.price)}</td>
+              <td>
+                <select class="form-control" style="width:auto;padding:3px 8px;font-size:12px"
+                  onchange="changeItemStatus(${orderId}, ${item.id}, this.value)">
+                  ${ITEM_STATUSES.map(s => `
+                    <option value="${s.value}" ${item.status === s.value ? 'selected' : ''}>${s.label}</option>
+                  `).join('')}
+                </select>
+              </td>
+              <td>
+                <div class="item-actions">
+                  <button class="btn btn-sm btn-secondary" onclick="showItemModal(${orderId}, ${item.id}, '${brand}', '${model}')">Изм.</button>
+                  <button class="btn btn-sm btn-danger" onclick="deleteItem(${orderId}, ${item.id})">✕</button>
+                </div>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// ─── Parts Table ──────────────────────────────────────────────────────────────
+function _renderPartsTable(parts, orderId) {
+  if (!parts || parts.length === 0) {
+    return `<div class="empty-state" style="padding:30px">
+      <p class="text-muted">Запчасти не добавлены. Нажмите «+ Добавить запчасть».</p>
+    </div>`;
+  }
+  return `
+    <div class="table-wrap" style="border:none;border-radius:0">
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th>Наименование</th>
+            <th>Артикул</th>
+            <th style="text-align:center">Кол-во</th>
+            <th>Цена (₸)</th>
+            <th>Сумма (₸)</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${parts.map(p => {
+    const sum = Math.round(p.price * p.qty);
+    return `
+            <tr>
+              <td class="td-primary">${App.escHtml(p.name)}</td>
+              <td class="text-sm text-muted">${p.article ? App.escHtml(p.article) : '—'}</td>
+              <td style="text-align:center">${+p.qty}</td>
+              <td>${App.formatMoney(p.price)}</td>
+              <td class="font-bold">${App.formatMoney(sum)}</td>
+              <td>
+                <div class="item-actions">
+                  <button class="btn btn-sm btn-secondary" onclick="showPartModal(${orderId}, ${p.id})">Изм.</button>
+                  <button class="btn btn-sm btn-danger" onclick="deletePart(${orderId}, ${p.id})">✕</button>
+                </div>
+              </td>
+            </tr>
+          `;
+  }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// ─── Part Modal ───────────────────────────────────────────────────────────────
+async function showPartModal(orderId, partId = null) {
+  let part = null;
+  if (partId) {
+    try {
+      const order = await App.api(`/orders/${orderId}`);
+      part = (order.parts || []).find(p => p.id === partId) || null;
+    } catch {}
+  }
+
+  App.openModal({
+    title: part ? 'Редактировать запчасть' : 'Добавить запчасть / материал',
+    body: `
+      <form id="part-form">
+        <div class="form-group">
+          <label>Наименование <span class="required">*</span></label>
+          <input name="name" class="form-control" required
+            value="${part ? App.escHtml(part.name) : ''}"
+            placeholder="Масляный фильтр, тормозная жидкость…" />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Артикул</label>
+            <input name="article" class="form-control"
+              value="${part ? App.escHtml(part.article || '') : ''}"
+              placeholder="AB-1234" />
+          </div>
+          <div class="form-group">
+            <label>Количество <span class="required">*</span></label>
+            <input name="qty" type="number" class="form-control" required min="0.001" step="0.001"
+              value="${part ? part.qty : 1}"
+              placeholder="1" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Цена за единицу (₸) <span class="required">*</span></label>
+          <input name="price" type="number" class="form-control" required min="0" step="100"
+            value="${part ? part.price : ''}"
+            placeholder="0"
+            id="part-price-input"
+            oninput="document.getElementById('part-sum-preview').textContent = 'Сумма: ' + App.formatMoney((parseFloat(this.value)||0) * (parseFloat(document.querySelector('[name=qty]').value)||1))" />
+          <div id="part-sum-preview" class="text-sm text-muted" style="margin-top:4px">
+            ${part ? `Сумма: ${App.formatMoney(part.price * part.qty)}` : ''}
+          </div>
+        </div>
+      </form>
+    `,
+    submitLabel: part ? 'Сохранить' : 'Добавить',
+    onSubmit: async () => {
+      const data = App.formData('part-form');
+      data.price = parseFloat(data.price) || 0;
+      data.qty = parseFloat(data.qty) || 1;
+
+      try {
+        if (partId) {
+          await App.api(`/orders/${orderId}/parts/${partId}`, { method: 'PUT', body: data });
+          App.toast('Запчасть обновлена');
+        } else {
+          await App.api(`/orders/${orderId}/parts`, { method: 'POST', body: data });
+          App.toast('Запчасть добавлена');
+        }
+        App.closeModal();
+        await renderOrderDetail(orderId);
+        // Switch to parts tab after add
+        if (!partId) {
+          setTimeout(() => switchOrderTab('parts', orderId, '', ''), 50);
+        }
+      } catch (err) {
+        App.toast(err.message, 'error');
+      }
+    },
+  });
+}
+
+async function deletePart(orderId, partId) {
+  if (!await App.confirm('Удалить эту запчасть из заказа?')) return;
+  try {
+    await App.api(`/orders/${orderId}/parts/${partId}`, { method: 'DELETE' });
+    App.toast('Запчасть удалена');
+    await renderOrderDetail(orderId);
+    setTimeout(() => switchOrderTab('parts', orderId, '', ''), 50);
+  } catch (err) {
+    App.toast(err.message, 'error');
+  }
+}
+
+// ─── Comments Drawer ──────────────────────────────────────────────────────────
+let _commentsOrderId = null;
+let _commentsImageFile = null;
+
+async function openCommentsDrawer(orderId) {
+  _commentsOrderId = orderId;
+  _commentsImageFile = null;
+
+  // Create backdrop
+  const backdrop = document.createElement('div');
+  backdrop.className = 'drawer-backdrop';
+  backdrop.id = 'drawer-backdrop';
+  backdrop.onclick = closeCommentsDrawer;
+  document.body.appendChild(backdrop);
+
+  // Create drawer
+  const drawer = document.createElement('div');
+  drawer.className = 'drawer';
+  drawer.id = 'comments-drawer';
+  drawer.innerHTML = `
+    <div class="drawer-header">
+      <span class="drawer-title">💬 Комментарии к заказу #${orderId}</span>
+      <button class="drawer-close" onclick="closeCommentsDrawer()">✕</button>
+    </div>
+    <div class="chat-messages" id="chat-messages">${App.spinner()}</div>
+    <div class="chat-input-bar">
+      <div id="chat-preview-wrap" class="chat-preview-wrap" style="display:none"></div>
+      <div class="chat-input-row">
+        <textarea class="chat-textarea" id="chat-text" placeholder="Написать комментарий…" rows="1"
+          onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendComment(${orderId});}"
+          oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"></textarea>
+        <label class="chat-attach-btn" title="Прикрепить изображение">
+          📎
+          <input type="file" id="chat-image-input" accept="image/*" style="display:none"
+            onchange="onChatImageSelected(this)" />
+        </label>
+        <button class="chat-send-btn" onclick="sendComment(${orderId})" title="Отправить">
+          ➤
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(drawer);
+
+  await loadComments(orderId);
+}
+
+async function loadComments(orderId) {
+  const messagesEl = document.getElementById('chat-messages');
+  if (!messagesEl) return;
+
+  try {
+    const comments = await App.api(`/orders/${orderId}/comments`);
+    _renderComments(comments, orderId);
+  } catch (err) {
+    messagesEl.innerHTML = `<p class="text-danger text-sm">Ошибка: ${App.escHtml(err.message)}</p>`;
+  }
+}
+
+function _renderComments(comments, orderId) {
+  const messagesEl = document.getElementById('chat-messages');
+  if (!messagesEl) return;
+
+  if (!comments || comments.length === 0) {
+    messagesEl.innerHTML = `
+      <div class="chat-empty">
+        <span style="font-size:36px">💬</span>
+        <span>Комментариев пока нет</span>
+        <span style="font-size:11px">Напишите первый или прикрепите фото дефекта</span>
+      </div>`;
+    return;
+  }
+
+  messagesEl.innerHTML = comments.map(c => {
+    const initials = (c.author || '?').substring(0, 2).toUpperCase();
+    const date = new Date(c.created_at);
+    const timeStr = date.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+    return `
+      <div class="chat-message" id="msg-${c.id}">
+        <div class="chat-message-header">
+          <div class="chat-avatar">${initials}</div>
+          <span class="chat-author">${App.escHtml(c.author)}</span>
+          <span class="chat-time">${timeStr}</span>
+        </div>
+        <div class="chat-bubble">
+          ${c.text ? `<div>${App.escHtml(c.text).replace(/\n/g, '<br>')}</div>` : ''}
+          ${c.image_path ? `<img src="${c.image_path}" alt="фото" onclick="showCommentImage('${c.image_path}')" />` : ''}
+        </div>
+        <button class="chat-delete-btn" onclick="deleteComment(${orderId}, ${c.id})">🗑 удалить</button>
+      </div>
+    `;
+  }).join('');
+
+  // Scroll to bottom
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function showCommentImage(src) {
+  let lightbox = document.getElementById('comment-lightbox');
+  if (lightbox) lightbox.remove();
+  lightbox = document.createElement('div');
+  lightbox.id = 'comment-lightbox';
+  lightbox.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:2000;display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(6px);';
+  lightbox.onclick = (e) => { if (e.target !== lightbox.querySelector('img')) lightbox.remove(); };
+  lightbox.innerHTML = `
+    <img src="${src}" style="max-width:95vw;max-height:90vh;object-fit:contain;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,0.8);" />
+    <button onclick="document.getElementById('comment-lightbox').remove()" style="position:absolute;top:16px;right:16px;background:rgba(255,255,255,0.2);border:none;color:#fff;width:38px;height:38px;border-radius:50%;font-size:20px;display:flex;align-items:center;justify-content:center;cursor:pointer;">✕</button>
+  `;
+  document.body.appendChild(lightbox);
+}
+
+function onChatImageSelected(input) {
+  if (!input.files || !input.files[0]) return;
+  _commentsImageFile = input.files[0];
+
+  const previewWrap = document.getElementById('chat-preview-wrap');
+  const url = URL.createObjectURL(_commentsImageFile);
+  previewWrap.style.display = 'flex';
+  previewWrap.innerHTML = `
+    <img src="${url}" alt="preview" />
+    <span>${App.escHtml(_commentsImageFile.name)}</span>
+    <button class="chat-preview-remove" onclick="removeChatImage()" title="Убрать">✕</button>
+  `;
+}
+
+function removeChatImage() {
+  _commentsImageFile = null;
+  const previewWrap = document.getElementById('chat-preview-wrap');
+  previewWrap.style.display = 'none';
+  previewWrap.innerHTML = '';
+  const fileInput = document.getElementById('chat-image-input');
+  if (fileInput) fileInput.value = '';
+}
+
+async function sendComment(orderId) {
+  const textEl = document.getElementById('chat-text');
+  const text = textEl ? textEl.value.trim() : '';
+
+  if (!text && !_commentsImageFile) {
+    App.toast('Введите текст или прикрепите изображение', 'error');
+    return;
+  }
+
+  const sendBtn = document.querySelector('.chat-send-btn');
+  if (sendBtn) sendBtn.disabled = true;
+
+  try {
+    const token = App.token || localStorage.getItem('sto_token');
+    const formData = new FormData();
+    if (text) formData.append('text', text);
+    if (_commentsImageFile) formData.append('image', _commentsImageFile);
+
+    const resp = await fetch(`/api/orders/${orderId}/comments`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(err.detail || 'Ошибка отправки');
+    }
+
+    // Clear input
+    if (textEl) { textEl.value = ''; textEl.style.height = 'auto'; }
+    removeChatImage();
+
+    // Reload comments
+    await loadComments(orderId);
+
+    // Update comment count badge in header button (if page is open)
+    const comments = await App.api(`/orders/${orderId}/comments`).catch(() => []);
+    const btnComments = document.getElementById('btn-comments');
+    if (btnComments) {
+      btnComments.innerHTML = `💬 Комментарии${comments.length > 0 ? ` <span style="background:var(--accent);color:#000;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${comments.length}</span>` : ''}`;
+    }
+
+  } catch (err) {
+    App.toast(err.message, 'error');
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
+  }
+}
+
+async function deleteComment(orderId, commentId) {
+  if (!await App.confirm('Удалить этот комментарий?')) return;
+  try {
+    await App.api(`/orders/${orderId}/comments/${commentId}`, { method: 'DELETE' });
+    App.toast('Комментарий удалён');
+    await loadComments(orderId);
+  } catch (err) {
+    App.toast(err.message, 'error');
+  }
+}
+
+function closeCommentsDrawer() {
+  const backdrop = document.getElementById('drawer-backdrop');
+  const drawer = document.getElementById('comments-drawer');
+  if (backdrop) backdrop.remove();
+  if (drawer) drawer.remove();
+  _commentsImageFile = null;
+}
+
+// ─── Print Modal ──────────────────────────────────────────────────────────────
+async function openPrintModal(orderId) {
+  let placeholders = [];
+  let templateExists = false;
+  const role = App.user?.role;
+  const canPlaceholders = Permissions.can(role, 'print.placeholders');
+  const canUpload       = Permissions.can(role, 'print.upload');
+  const canGenerate     = Permissions.can(role, 'print.generate');
+
+  // If only generate is allowed — skip the modal entirely and just download
+  if (!canPlaceholders && !canUpload && canGenerate) {
+    try {
+      const { exists } = await App.api('/print-templates/template-exists');
+      if (!exists) {
+        App.toast('Шаблон не загружен. Обратитесь к администратору.', 'error');
+        return;
+      }
+    } catch {}
+    generateOrderDoc(orderId);
+    return;
+  }
+
+  try {
+    [placeholders, { exists: templateExists }] = await Promise.all([
+      App.api('/print-templates/placeholders'),
+      App.api('/print-templates/template-exists'),
+    ]);
+  } catch {}
+
+  // Determine which tabs are visible
+  const tabs = [];
+  if (canPlaceholders) tabs.push({ id: 'help',   label: '📋 Плейсхолдеры' });
+  if (canUpload)       tabs.push({ id: 'upload', label: '⬆ Загрузить шаблон' });
+  if (canGenerate)     tabs.push({ id: 'gen',    label: '📄 Сформировать' });
+
+  const firstTab = tabs[0]?.id || 'gen';
+
+  App.openModal({
+    title: '🖨 Конструктор печатной формы',
+    wide: true,
+    body: `
+      <div style="font-size:13px">
+
+        ${tabs.length > 1 ? `
+        <div class="card-tabs" style="margin:-16px -20px 16px;padding:0 20px">
+          ${tabs.map(t => `<div class="card-tab ${t.id === firstTab ? 'active' : ''}" id="print-tab-${t.id}" onclick="switchPrintTab('${t.id}')">${t.label}</div>`).join('')}
+        </div>` : ''}
+
+        <!-- Placeholders list -->
+        ${canPlaceholders ? `
+        <div id="print-pane-help" class="tab-pane ${firstTab === 'help' ? 'active' : ''}">
+          <p class="text-muted text-sm mb-4">
+            Создайте DOCX-шаблон в Word, вставьте нужные плейсхолдеры из списка ниже,
+            затем загрузите шаблон на вкладке «Загрузить шаблон».
+          </p>
+          <table class="print-placeholders-table">
+            <thead><tr><th>Плейсхолдер</th><th>Описание</th></tr></thead>
+            <tbody>
+              ${placeholders.map(p => `
+                <tr>
+                  <td>${App.escHtml(p.key)}</td>
+                  <td style="color:var(--text-secondary)">${App.escHtml(p.description)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>` : ''}
+
+        <!-- Upload template -->
+        ${canUpload ? `
+        <div id="print-pane-upload" class="tab-pane ${firstTab === 'upload' ? 'active' : ''}">
+          <div class="template-status ${templateExists ? 'ok' : 'missing'}">
+            ${templateExists ? '✅ Шаблон загружен и готов к использованию' : '⚠️ Шаблон ещё не загружен'}
+          </div>
+          <div class="form-group">
+            <label>Выберите DOCX-файл шаблона</label>
+            <input type="file" id="print-template-file" accept=".docx" class="form-control" />
+          </div>
+          <button class="btn btn-primary" id="btn-upload-template" onclick="uploadPrintTemplate()">
+            ⬆ Загрузить шаблон
+          </button>
+          <p class="text-muted text-sm" style="margin-top:10px">
+            Файл заменит текущий шаблон. Используйте расширение .docx (Microsoft Word).
+          </p>
+        </div>` : ''}
+
+        <!-- Generate -->
+        ${canGenerate ? `
+        <div id="print-pane-gen" class="tab-pane ${firstTab === 'gen' ? 'active' : ''}">
+          <div class="template-status ${templateExists ? 'ok' : 'missing'}">
+            ${templateExists ? '✅ Шаблон загружен — можно формировать документ' : '⚠️ Шаблон не загружен. Обратитесь к администратору.'}
+          </div>
+          ${templateExists ? `
+            <p class="text-muted text-sm mb-4">
+              Нажмите кнопку ниже — сервер подставит данные заказа #${orderId} в шаблон и скачает готовый DOCX.
+            </p>
+            <button class="btn btn-primary btn-lg" onclick="generateOrderDoc(${orderId})">
+              📄 Сформировать и скачать DOCX
+            </button>
+          ` : `
+            <p class="text-muted text-sm">Сначала загрузите шаблон.</p>
+          `}
+        </div>` : ''}
+
+      </div>
+    `,
+    noFooter: true,
+  });
+}
+
+
+function switchPrintTab(tab) {
+  document.querySelectorAll('#print-pane-help,#print-pane-upload,#print-pane-gen').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('#print-tab-help,#print-tab-upload,#print-tab-gen').forEach(t => t.classList.remove('active'));
+  document.getElementById(`print-pane-${tab}`).classList.add('active');
+  document.getElementById(`print-tab-${tab}`).classList.add('active');
+}
+
+async function uploadPrintTemplate() {
+  const fileInput = document.getElementById('print-template-file');
+  if (!fileInput || !fileInput.files[0]) {
+    App.toast('Выберите файл', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btn-upload-template');
+  if (btn) btn.disabled = true;
+
+  try {
+    const token = App.token || localStorage.getItem('sto_token');
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+
+    const resp = await fetch('/api/print-templates/upload', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(err.detail || 'Ошибка загрузки');
+    }
+
+    App.toast('Шаблон успешно загружен!');
+    App.closeModal();
+  } catch (err) {
+    App.toast(err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function generateOrderDoc(orderId) {
+  try {
+    const token = App.token || localStorage.getItem('sto_token');
+    App.toast('Формируется документ…');
+
+    const resp = await fetch(`/api/print-templates/generate/${orderId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(err.detail || 'Ошибка генерации');
+    }
+
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Заказ-наряд_№${orderId}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+
+    App.toast('Документ сформирован и скачан!');
+    App.closeModal();
+  } catch (err) {
+    App.toast(err.message, 'error');
+  }
+}
+
+// ─── Inline Client & Vehicle Creation ─────────────────────────────────────────
+
+async function onOrderClientChanged(orderId, clientId) {
+  const cId = clientId ? parseInt(clientId) : null;
+  try {
+    await App.api(`/orders/${orderId}`, {
+      method: 'PUT',
+      body: { client_id: cId, vehicle_id: null },
+    });
+    App.toast('Клиент привязан к заказу');
+    renderOrderDetail(orderId);
+  } catch (err) {
+    App.toast(err.message, 'error');
+  }
+}
+
+async function onOrderVehicleChanged(orderId, vehicleId) {
+  const vId = vehicleId ? parseInt(vehicleId) : null;
+  try {
+    await App.api(`/orders/${orderId}`, {
+      method: 'PUT',
+      body: { vehicle_id: vId },
+    });
+    App.toast('Автомобиль привязан к заказу');
+
+    const order = await App.api(`/orders/${orderId}`).catch(() => null);
+    const hasCatalogItems = order?.items?.some(i => i.service_id);
+    if (vId && hasCatalogItems) {
+      const confirmed = await App.confirm(
+        'У заказа есть позиции, добавленные из справочника услуг. Пересчитать их цены под новый автомобиль?'
+      );
+      if (confirmed) {
+        await recalcOrderPrices(orderId);
+        return;
+      }
+    }
+
+    renderOrderDetail(orderId);
+  } catch (err) {
+    App.toast(err.message, 'error');
+  }
+}
+
+async function recalcOrderPrices(orderId) {
+  try {
+    const result = await App.api(`/orders/${orderId}/recalculate-prices`, { method: 'POST' });
+    if (result.updated_count > 0) {
+      App.toast(`Обновлено цен: ${result.updated_count}`);
+    } else {
+      App.toast('Все цены уже актуальны — обновлять нечего');
+    }
+    renderOrderDetail(orderId);
+  } catch (err) {
+    App.toast(err.message, 'error');
+  }
+}
+
+function inlineCreateClient(orderId) {
+  App.openModal({
+    title: 'Быстрое создание клиента',
+    body: `
+      <form id="inline-client-form">
+        <div class="form-group">
+          <label>ФИО <span class="required">*</span></label>
+          <input name="full_name" class="form-control" required placeholder="Иванов Иван Иванович" />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Телефон <span class="required">*</span></label>
+            <input name="phone" id="inline-client-phone" class="form-control" required
+              placeholder="+7 (___) ___-__-__" inputmode="numeric" />
+          </div>
+          <div class="form-group">
+            <label>Email</label>
+            <input name="email" type="email" class="form-control" placeholder="client@example.kz" />
+          </div>
+        </div>
+      </form>
+    `,
+    submitLabel: 'Создать и выбрать',
+    onSubmit: async () => {
+      const data = App.formData('inline-client-form');
+      try {
+        const newClient = await App.api('/clients/', { method: 'POST', body: data });
+        App.toast(`Клиент «${newClient.full_name}» создан!`);
+        App.closeModal();
+        await onOrderClientChanged(orderId, newClient.id);
+      } catch (err) {
+        App.toast(err.message, 'error');
+      }
+    },
+  });
+  setTimeout(() => {
+    const phoneInput = document.getElementById('inline-client-phone');
+    if (phoneInput) attachPhoneMask(phoneInput);
+  }, 0);
+}
+
+async function inlineCreateVehicle(orderId, clientId) {
+  if (!clientId) {
+    App.toast('Сначала выберите клиента!', 'error');
+    return;
+  }
+
+  let brands = [];
+  try { brands = await App.api('/vehicles/brands'); } catch {}
+
+  App.openModal({
+    title: 'Быстрое добавление автомобиля',
+    body: `
+      <form id="inline-vehicle-form">
+        <input type="hidden" name="client_id" value="${clientId}" />
+        <div class="form-row">
+          <div class="form-group">
+            <label>Марка <span class="required">*</span></label>
+            <select name="brand" id="inline-veh-brand" class="form-control" required onchange="onInlineVehBrandChanged(this.value)">
+              <option value="">— Выберите марку —</option>
+              ${brands.map(b => `<option value="${App.escHtml(b.name)}" data-id="${b.id}">${App.escHtml(b.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Модель <span class="required">*</span></label>
+            <input name="model" id="inline-veh-model" class="form-control" required placeholder="Camry, RX, X5…" list="inline-veh-models" />
+            <datalist id="inline-veh-models"></datalist>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Год выпуска</label>
+            <input name="year" type="number" class="form-control" placeholder="2022" min="1900" max="${new Date().getFullYear() + 1}" />
+          </div>
+          <div class="form-group">
+            <label>Гос. номер</label>
+            <input name="plate_number" class="form-control" placeholder="777AAA01" />
+          </div>
+        </div>
+      </form>
+    `,
+    submitLabel: 'Добавить и выбрать',
+    onSubmit: async () => {
+      const data = App.formData('inline-vehicle-form');
+      if (data.year) data.year = parseInt(data.year);
+      try {
+        const newVehicle = await App.api('/vehicles/', { method: 'POST', body: data });
+        App.toast(`Автомобиль ${newVehicle.brand} ${newVehicle.model} добавлен!`);
+        App.closeModal();
+        await onOrderVehicleChanged(orderId, newVehicle.id);
+      } catch (err) {
+        App.toast(err.message, 'error');
+      }
+    },
+  });
+}
+
+async function onInlineVehBrandChanged(brandName) {
+  const bSelect = document.getElementById('inline-veh-brand');
+  const dList = document.getElementById('inline-veh-models');
+  const modelInput = document.getElementById('inline-veh-model');
+
+  dList.innerHTML = '';
+  if (modelInput) modelInput.value = '';
+
+  if (!bSelect || bSelect.selectedIndex <= 0) return;
+  const brandId = bSelect.options[bSelect.selectedIndex].getAttribute('data-id');
+  if (!brandId) return;
+
+  try {
+    const models = await App.api(`/vehicles/brands/${brandId}/models`);
+    if (models) {
+      dList.innerHTML = models.map(m => `<option value="${App.escHtml(m.name)}"></option>`).join('');
+    }
+  } catch {}
+}
+
+// ─── Order Item Modal with Service Catalog & Auto-Pricing ─────────────────────
+
+async function showItemModal(orderId, itemId = null, brand = '', model = '') {
+  let employees = [], services = [], item = null;
+  try {
+    [employees, services] = await Promise.all([
+      App.api('/employees/'),
+      App.api('/services/'),
+    ]);
+    if (itemId) {
+      const order = await App.api(`/orders/${orderId}`);
+      item = order?.items?.find(i => i.id === itemId) || null;
+    }
+  } catch {}
+
+  App.openModal({
+    title: item ? 'Редактировать позицию' : 'Добавить работу из справочника',
+    body: `
+      <form id="item-form">
+        <input type="hidden" name="service_id" id="item-service-id" value="${item?.service_id || ''}" />
+        <div class="form-group mb-4">
+          <label>Выбрать из Справочника услуг</label>
+          <div class="flex gap-2">
+            <select class="form-control" id="select-catalog-service" onchange="onCatalogServiceSelected(this.value, '${brand}', '${model}')">
+              <option value="">— Создать вручную или выбрать услугу —</option>
+              ${services.map(s => `<option value="${s.id}" ${item?.service_id === s.id ? 'selected' : ''}>${App.escHtml(s.name)}${s.category ? ` (${App.escHtml(s.category.name)})` : ''}</option>`).join('')}
+            </select>
+            <button type="button" class="btn btn-secondary" onclick="inlineCreateService('${brand}', '${model}')" style="flex-shrink:0">
+              + Создать услугу
+            </button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Наименование работы <span class="required">*</span></label>
+          <input name="work_name" id="item-work-name" class="form-control" required
+            value="${item ? App.escHtml(item.work_name) : ''}"
+            placeholder="Замена масла, тормозные колодки…" />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>
+              Цена (₸) <span class="required">*</span>
+              <span id="price-resolved-badge" class="text-sm text-success" style="margin-left:6px;font-weight:normal"></span>
+            </label>
+            <input name="price" id="item-price" type="number" class="form-control" required min="0" step="100"
+              value="${item ? item.price : ''}"
+              placeholder="0" />
+          </div>
+          <div class="form-group">
+            <label>Исполнитель</label>
+            <select name="employee_id" class="form-control">
+              <option value="">— Не назначен —</option>
+              ${employees.map(e => `
+                <option value="${e.id}" ${item?.employee_id === e.id ? 'selected' : ''}>
+                  ${App.escHtml(e.full_name)}
+                </option>
+              `).join('')}
+            </select>
+          </div>
+        </div>
+
+        ${item ? `
+        <div class="form-group">
+          <label>Статус</label>
+          <select name="status" class="form-control">
+            ${ITEM_STATUSES.map(s => `
+              <option value="${s.value}" ${item.status === s.value ? 'selected' : ''}>${s.label}</option>
+            `).join('')}
+          </select>
+        </div>` : ''}
+      </form>
+    `,
+    submitLabel: item ? 'Сохранить' : 'Добавить',
+    onSubmit: async () => {
+      const data = App.formData('item-form');
+      data.price = parseFloat(data.price) || 0;
+      if (!data.employee_id) data.employee_id = null;
+      data.service_id = data.service_id ? parseInt(data.service_id) : null;
+
+      try {
+        if (itemId) {
+          await App.api(`/orders/${orderId}/items/${itemId}`, { method: 'PUT', body: data });
+          App.toast('Позиция обновлена');
+        } else {
+          await App.api(`/orders/${orderId}/items`, { method: 'POST', body: data });
+          App.toast('Работа добавлена');
+        }
+        App.closeModal();
+        renderOrderDetail(orderId);
+      } catch (err) {
+        App.toast(err.message, 'error');
+      }
+    },
+  });
+}
+
+async function onCatalogServiceSelected(serviceId, brand, model) {
+  if (!serviceId) return;
+  const select = document.getElementById('select-catalog-service');
+  const serviceName = select.options[select.selectedIndex].text.split(' (')[0];
+
+  document.getElementById('item-work-name').value = serviceName;
+  document.getElementById('item-service-id').value = serviceId;
+
+  try {
+    const qs = new URLSearchParams({ service_id: serviceId });
+    if (brand) qs.append('brand', brand);
+    if (model) qs.append('model', model);
+
+    const priceInfo = await App.api(`/services/resolve-price/check?${qs.toString()}`);
+    if (priceInfo && priceInfo.price !== undefined) {
+      document.getElementById('item-price').value = priceInfo.price;
+      const badge = document.getElementById('price-resolved-badge');
+      if (priceInfo.match_type === 'brand_model') badge.textContent = `(спец. цена для ${brand} ${model})`;
+      else if (priceInfo.match_type === 'brand') badge.textContent = `(цена для марки ${brand})`;
+      else badge.textContent = `(базовая цена)`;
+    }
+  } catch {}
+}
+
+async function inlineCreateService(brand, model) {
+  const { roots } = await fetchCategoryTree();
+
+  App.openModal({
+    title: 'Создание новой услуги в справочнике',
+    body: `
+      <form id="inline-service-form">
+        <div class="form-group">
+          <label>Наименование услуги <span class="required">*</span></label>
+          <input name="name" class="form-control" required placeholder="Компьютерная диагностика" />
+        </div>
+        <div class="form-group">
+          <label>Категория</label>
+          <select name="category_id" class="form-control">
+            <option value="">— Без категории —</option>
+            ${renderCategoryOptions(roots)}
+          </select>
+        </div>
+        <p class="text-muted text-sm">Цену для услуги вы зададите отдельно, в справочнике услуг.</p>
+      </form>
+    `,
+    submitLabel: 'Создать и выбрать',
+    onSubmit: async () => {
+      const raw = App.formData('inline-service-form');
+      const data = {
+        name: raw.name,
+        category_id: raw.category_id ? parseInt(raw.category_id) : null,
+      };
+
+      try {
+        const newService = await App.api('/services/', { method: 'POST', body: data });
+        App.toast(`Услуга «${newService.name}» создана в справочнике! Не забудьте задать ей цену на странице «Услуги».`);
+        App.closeModal();
+
+        document.getElementById('item-work-name').value = newService.name;
+        document.getElementById('item-service-id').value = newService.id;
+      } catch (err) {
+        App.toast(err.message, 'error');
+      }
+    },
+  });
+}
+
+async function changeItemStatus(orderId, itemId, newStatus) {
+  try {
+    await App.api(`/orders/${orderId}/items/${itemId}`, {
+      method: 'PUT',
+      body: { status: newStatus },
+    });
+    App.toast('Статус позиции обновлён');
+    renderOrderDetail(orderId);
+  } catch (err) {
+    App.toast(err.message, 'error');
+  }
+}
+
+async function deleteItem(orderId, itemId) {
+  if (!await App.confirm('Удалить эту позицию из заказа?')) return;
+  try {
+    await App.api(`/orders/${orderId}/items/${itemId}`, { method: 'DELETE' });
+    App.toast('Позиция удалена');
+    renderOrderDetail(orderId);
+  } catch (err) {
+    App.toast(err.message, 'error');
+  }
+}
+
+async function deleteOrder(id) {
+  if (!await App.confirm('Удалить этот заказ-наряд? Все позиции также будут удалены.')) return;
+  try {
+    await App.api(`/orders/${id}`, { method: 'DELETE' });
+    App.toast('Заказ-наряд удалён');
+    App.navigate('/orders');
+  } catch (err) {
+    App.toast(err.message, 'error');
+  }
+}
+
+// ── Share order link ──────────────────────────────────────────────────────────
+
+async function shareOrder(id) {
+  const btn = document.getElementById('btn-share');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ ...'; }
+  try {
+    const order = await App.api(`/orders/${id}/share`, { method: 'POST' });
+    const shareUrl = `${window.location.origin}/share/${order.sharing_token}`;
+    showShareModal(shareUrl);
+  } catch (err) {
+    App.toast(err.message || 'Не удалось создать ссылку', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '🔗 Поделиться'; }
+  }
+}
+
+function showShareModal(url) {
+  // Remove old modal if exists
+  const old = document.getElementById('share-modal-overlay');
+  if (old) old.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'share-modal-overlay';
+  overlay.style.cssText = `
+    position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;
+    display:flex;align-items:center;justify-content:center;padding:20px;
+    backdrop-filter:blur(4px);
+  `;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  overlay.innerHTML = `
+    <div style="background:var(--bg-card,#1a1d27);border:1px solid rgba(255,255,255,0.12);
+         border-radius:14px;padding:clamp(16px, 5vw, 28px);max-width:520px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.5);
+         animation:fadeInUp 0.2s ease;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3 style="font-size:16px;font-weight:700;color:var(--text,#e2e8f0);">🔗 Поделиться с клиентом</h3>
+        <button onclick="document.getElementById('share-modal-overlay').remove()"
+          style="background:none;border:none;color:var(--text-muted,#8892a4);cursor:pointer;font-size:22px;line-height:1;padding:4px;">✕</button>
+      </div>
+      <p style="font-size:13px;color:var(--text-muted,#8892a4);margin-bottom:16px;">
+        Клиент сможет просматривать статус заказа и оставлять комментарии без входа в систему.
+      </p>
+      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+        <input id="share-url-input" readonly value="${url}"
+          style="flex:1 1 200px;min-width:0;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);
+                 border-radius:8px;padding:10px 12px;color:var(--text,#e2e8f0);font-size:14px;outline:none;
+                 font-family:monospace;">
+        <button id="share-copy-btn" onclick="copyShareLink('${url}')"
+          style="background:linear-gradient(135deg,#3182ce,#553c9a);color:#fff;border:none;
+                 border-radius:8px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer;
+                 white-space:nowrap;font-family:inherit;min-height:44px;flex:1 1 auto;">
+          Копировать
+        </button>
+      </div>
+      <div id="share-copy-status" style="font-size:12px;color:#48bb78;text-align:center;min-height:18px;"></div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  // Auto-select the URL
+  setTimeout(() => {
+    const input = document.getElementById('share-url-input');
+    if (input) input.select();
+  }, 50);
+}
+
+function copyShareLink(url) {
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.getElementById('share-copy-btn');
+    const status = document.getElementById('share-copy-status');
+    if (btn) btn.textContent = '✓ Скопировано!';
+    if (status) status.textContent = 'Ссылка скопирована в буфер обмена';
+    setTimeout(() => {
+      if (btn) btn.textContent = 'Копировать';
+      if (status) status.textContent = '';
+    }, 2500);
+  }).catch(() => {
+    // Fallback for older browsers
+    const input = document.getElementById('share-url-input');
+    if (input) { input.select(); document.execCommand('copy'); }
+    App.toast('Ссылка скопирована');
+  });
+}
