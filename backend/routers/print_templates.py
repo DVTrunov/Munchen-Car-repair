@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 
 from database import get_db
-from auth import get_current_user
+from auth import get_current_user, get_owner_user
 import models
 from sqlalchemy.orm import Session
 
@@ -73,12 +73,16 @@ def template_exists(_: models.User = Depends(get_current_user)):
 @router.post("/upload")
 async def upload_template(
     file: UploadFile = File(...),
-    _: models.User = Depends(get_current_user),
+    _: models.User = Depends(get_owner_user),
 ):
     if not file.filename.endswith(".docx"):
         raise HTTPException(status_code=422, detail="Допускается только файл формата .docx")
 
-    content = await file.read()
+    content = await file.read(20 * 1024 * 1024 + 1)
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Файл шаблона слишком большой (максимум 20 МБ)")
+    if not content.startswith(b"PK"):
+        raise HTTPException(status_code=422, detail="Файл не похож на документ .docx")
     with open(TEMPLATE_FILE, "wb") as f:
         f.write(content)
 
