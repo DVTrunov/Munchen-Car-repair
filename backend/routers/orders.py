@@ -16,10 +16,11 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 
 from database import get_db
-from auth import get_current_user
+from auth import get_current_user, get_owner_user
 import models
 import schemas
 from notifications import send_notification
+from upload_utils import save_image
 
 router = APIRouter()
 
@@ -169,7 +170,7 @@ def update_order(
 def delete_order(
     order_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    _: models.User = Depends(get_owner_user),
 ):
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
@@ -378,18 +379,7 @@ async def add_comment(
 
     image_path = None
     if image and image.filename:
-        # Validate file type
-        allowed = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-        if image.content_type not in allowed:
-            raise HTTPException(status_code=422, detail="Поддерживаются только изображения (jpg, png, gif, webp)")
-
-        ext = os.path.splitext(image.filename)[1].lower() or ".jpg"
-        filename = f"order_{order_id}_{uuid.uuid4().hex}{ext}"
-        file_path = os.path.join(UPLOADS_DIR, filename)
-        content = await image.read()
-        with open(file_path, "wb") as f:
-            f.write(content)
-        image_path = f"/uploads/{filename}"
+        image_path = await save_image(image, UPLOADS_DIR, prefix=f"order_{order_id}")
 
     comment = models.OrderComment(
         order_id=order_id,

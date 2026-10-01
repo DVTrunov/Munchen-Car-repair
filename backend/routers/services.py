@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from database import get_db
-from auth import get_current_user
+from auth import get_current_user, get_owner_user
 import models
 import schemas
 
@@ -34,7 +34,7 @@ def list_services(
 def create_service(
     data: schemas.ServiceCreate,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    _: models.User = Depends(get_owner_user),
 ):
     """Create a new service. Price is set separately via /{service_id}/prices."""
     if data.category_id:
@@ -70,7 +70,7 @@ def update_service(
     service_id: int,
     data: schemas.ServiceUpdate,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    _: models.User = Depends(get_owner_user),
 ):
     service = db.query(models.Service).filter(models.Service.id == service_id).first()
     if not service:
@@ -86,7 +86,7 @@ def update_service(
 def delete_service(
     service_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    _: models.User = Depends(get_owner_user),
 ):
     service = db.query(models.Service).filter(models.Service.id == service_id).first()
     if not service:
@@ -102,7 +102,7 @@ def set_service_price(
     service_id: int,
     data: schemas.ServicePriceCreate,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    _: models.User = Depends(get_owner_user),
 ):
     """
     Set or update price rule for a service.
@@ -155,7 +155,7 @@ def set_service_price(
 def delete_service_price(
     price_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    _: models.User = Depends(get_owner_user),
 ):
     price_entry = db.query(models.ServicePrice).filter(models.ServicePrice.id == price_id).first()
     if not price_entry:

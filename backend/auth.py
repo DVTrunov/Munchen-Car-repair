@@ -3,7 +3,7 @@ Authentication module: password hashing, JWT creation/validation,
 and FastAPI dependency functions for getting the current user.
 """
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -18,7 +18,13 @@ import models
 
 load_dotenv()
 
-SECRET_KEY = os.getenv("SECRET_KEY", "fallback-dev-key-change-in-production")
+SECRET_KEY = os.getenv("SECRET_KEY", "")
+if len(SECRET_KEY) < 32 or "change" in SECRET_KEY.lower():
+    raise RuntimeError(
+        "SECRET_KEY не задан или слишком простой. Сгенерируйте ключ командой\n"
+        "  python -c \"import secrets; print(secrets.token_hex(32))\"\n"
+        "и пропишите его в .env"
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480"))
 
@@ -36,7 +42,7 @@ def get_password_hash(password: str) -> str:
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode["exp"] = expire
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 

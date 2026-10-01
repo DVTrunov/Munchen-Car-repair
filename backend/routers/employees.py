@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
-from auth import get_current_user, get_password_hash
+from auth import get_current_user, get_owner_user, get_password_hash
 import models
 import schemas
 
@@ -24,7 +24,7 @@ def list_employees(
 def create_employee(
     data: schemas.EmployeeCreate,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    _: models.User = Depends(get_owner_user),
 ):
     user_id = None
     if data.username and data.username.strip():
@@ -71,7 +71,7 @@ def update_employee(
     employee_id: int,
     data: schemas.EmployeeUpdate,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    _: models.User = Depends(get_owner_user),
 ):
     employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
     if not employee:
@@ -126,7 +126,7 @@ def update_employee(
 def delete_employee(
     employee_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    _: models.User = Depends(get_owner_user),
 ):
     employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
     if not employee:

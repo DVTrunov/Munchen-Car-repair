@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
-from auth import get_current_user
+from auth import get_current_user, get_owner_user
 import models
 import schemas
 
@@ -28,7 +28,7 @@ def list_categories(
 def create_category(
     data: schemas.ServiceCategoryCreate,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    _: models.User = Depends(get_owner_user),
 ):
     if data.parent_id:
         parent = db.query(models.ServiceCategory).filter(models.ServiceCategory.id == data.parent_id).first()
@@ -47,7 +47,7 @@ def update_category(
     category_id: int,
     data: schemas.ServiceCategoryUpdate,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    _: models.User = Depends(get_owner_user),
 ):
     category = db.query(models.ServiceCategory).filter(models.ServiceCategory.id == category_id).first()
     if not category:
@@ -86,7 +86,7 @@ def update_category(
 def delete_category(
     category_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    _: models.User = Depends(get_owner_user),
 ):
     category = db.query(models.ServiceCategory).filter(models.ServiceCategory.id == category_id).first()
     if not category:

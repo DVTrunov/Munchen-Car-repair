@@ -12,6 +12,7 @@ Routes:
 """
 import os
 import logging
+import secrets
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -33,7 +34,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
+FRONTEND_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
 
 
 def seed_database() -> None:
@@ -68,21 +69,29 @@ def seed_database() -> None:
 
     db = SessionLocal()
     try:
-        if not db.query(models.User).filter_by(username="owner").first():
+        # Первый владелец создаётся только если в базе ещё нет ни одного пользователя.
+        # Пароль берётся из .env (INITIAL_OWNER_PASSWORD), а если его нет —
+        # генерируется случайный и один раз выводится в консоль.
+        if not db.query(models.User).first():
+            password = os.getenv("INITIAL_OWNER_PASSWORD")
+            generated = not password
+            if generated:
+                password = secrets.token_urlsafe(12)
             db.add(models.User(
                 username="owner",
-                hashed_password=get_password_hash("owner123"),
+                hashed_password=get_password_hash(password),
                 role=models.UserRole.owner,
             ))
-            logger.info("Создан пользователь: owner / owner123")
-
-        if not db.query(models.User).filter_by(username="manager").first():
-            db.add(models.User(
-                username="manager",
-                hashed_password=get_password_hash("manager123"),
-                role=models.UserRole.manager,
-            ))
-            logger.info("Создан пользователь: manager / manager123")
+            if generated:
+                print(
+                    "\n" + "=" * 60 +
+                    f"\nСоздан владелец: логин owner, пароль {password}"
+                    "\nСохраните пароль — он больше не будет показан." +
+                    "\n" + "=" * 60 + "\n",
+                    flush=True,
+                )
+            else:
+                logger.info("Создан владелец owner (пароль из INITIAL_OWNER_PASSWORD)")
 
         # Seed Car Brands & Models Catalog
         if not db.query(models.CarBrand).first():
@@ -136,15 +145,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS: allow all origins for local network access (СТО use case)
-# Restrict `allow_origins` to specific hosts when deploying to the internet
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS: фронтенд отдаётся этим же сервером, поэтому CORS нужен только если
+# API вызывается с другого домена. Список доменов — в ALLOWED_ORIGINS через запятую.
+_allowed_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+if _allowed_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # ─── API routers ─────────────────────────────────────────────────────────────
 app.include_router(auth.router,      prefix="/api/auth",      tags=["auth"])
@@ -183,8 +194,9 @@ if os.path.isdir(FRONTEND_DIR):
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
         """Catch-all: serve index.html for SPA routes, actual files for assets."""
-        file_path = os.path.join(FRONTEND_DIR, full_path)
-        if os.path.isfile(file_path):
+        # Защита от выхода за пределы папки frontend (../backend/sto.db, ../.env и т.п.)
+        file_path = os.path.realpath(os.path.join(FRONTEND_DIR, full_path))
+        if file_path.startswith(FRONTEND_DIR + os.sep) and os.path.isfile(file_path):
             return FileResponse(file_path)
         return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
 
@@ -195,5 +207,5 @@ if __name__ == "__main__":
         "main:app",
         host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "8000")),
-        reload=True,
+        reload=os.getenv("DEBUG", "false").lower() == "true",
     )

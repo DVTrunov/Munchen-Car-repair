@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models
 import schemas
+from upload_utils import save_image
 
 router = APIRouter()
 
@@ -66,21 +67,14 @@ async def add_shared_comment(
     if not text and not image:
         raise HTTPException(status_code=422, detail="Необходимо указать текст или прикрепить изображение")
 
-    author = (author_name or "Клиент").strip() or "Клиент"
+    # Комментарий по публичной ссылке всегда помечается как клиентский,
+    # чтобы клиент не мог подписаться именем сотрудника.
+    name = (author_name or "").strip()[:80]
+    author = f"Клиент: {name}" if name else "Клиент"
 
     image_path = None
     if image and image.filename:
-        allowed = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-        if image.content_type not in allowed:
-            raise HTTPException(status_code=422, detail="Поддерживаются только изображения (jpg, png, gif, webp)")
-
-        ext = os.path.splitext(image.filename)[1].lower() or ".jpg"
-        filename = f"order_{order.id}_{uuid.uuid4().hex}{ext}"
-        file_path = os.path.join(UPLOADS_DIR, filename)
-        content = await image.read()
-        with open(file_path, "wb") as f:
-            f.write(content)
-        image_path = f"/uploads/{filename}"
+        image_path = await save_image(image, UPLOADS_DIR, prefix=f"order_{order.id}")
 
     comment = models.OrderComment(
         order_id=order.id,
