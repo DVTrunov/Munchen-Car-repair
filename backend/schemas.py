@@ -37,6 +37,31 @@ class UserOut(BaseModel):
     id: int
     username: str
     role: str
+    employee_id: Optional[int] = None
+    employee_name: Optional[str] = None
+
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    role: str = "mechanic"
+    employee_id: Optional[int] = None
+
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    password: Optional[str] = None
+    role: Optional[str] = None
+    employee_id: Optional[int] = None
+
+
+class UserPasswordChange(BaseModel):
+    password: str
+
+
+class ChangeOwnPasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
 
 
 # ─── Client ──────────────────────────────────────────────────────────────────
@@ -340,6 +365,7 @@ class OrderOut(OrderBase):
     services_total: float = 0.0
     parts_total: float = 0.0
     sharing_token: Optional[str] = None
+    share_url: Optional[str] = None
     client: Optional[ClientShort] = None
     vehicle: Optional[VehicleShort] = None
     items: List[OrderItemOut] = []

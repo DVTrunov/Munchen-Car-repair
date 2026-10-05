@@ -59,6 +59,8 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     role = Column(String(50), nullable=False, default="mechanic")
 
+    employee = relationship("Employee", foreign_keys="Employee.user_id", back_populates="user", uselist=False)
+
 
 class Client(Base):
     __tablename__ = "clients"
@@ -98,7 +100,7 @@ class Employee(Base):
     rate_value = Column(Float, nullable=False, default=0.0)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
-    user = relationship("User", foreign_keys=[user_id])
+    user = relationship("User", foreign_keys=[user_id], back_populates="employee")
     order_items = relationship("OrderItem", back_populates="employee")
 
     @property

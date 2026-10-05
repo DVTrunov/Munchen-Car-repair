@@ -7,7 +7,13 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from database import get_db
-from auth import authenticate_user, create_access_token, get_current_user
+from auth import (
+    authenticate_user,
+    create_access_token,
+    get_current_user,
+    verify_password,
+    get_password_hash,
+)
 import models
 import schemas
 
@@ -65,4 +71,29 @@ async def login(
 @router.get("/me", response_model=schemas.UserOut)
 async def get_me(current_user: models.User = Depends(get_current_user)):
     """Return current authenticated user info."""
-    return current_user
+    return schemas.UserOut(
+        id=current_user.id,
+        username=current_user.username,
+        role=current_user.role.value if hasattr(current_user.role, 'value') else str(current_user.role),
+        employee_id=current_user.employee.id if current_user.employee else None,
+        employee_name=current_user.employee.full_name if current_user.employee else None,
+    )
+
+
+@router.post("/change-password")
+async def change_own_password(
+    data: schemas.ChangeOwnPasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Allow currently logged-in user to change their own password."""
+    if not verify_password(data.old_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Текущий пароль указан неверно")
+
+    new_pw = data.new_password.strip()
+    if len(new_pw) < 4:
+        raise HTTPException(status_code=422, detail="Новый пароль должен содержать минимум 4 символа")
+
+    current_user.hashed_password = get_password_hash(new_pw)
+    db.commit()
+    return {"ok": True, "detail": "Пароль успешно изменён"}

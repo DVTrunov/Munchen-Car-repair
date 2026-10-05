@@ -54,7 +54,11 @@
 /* ─── Reset & Base ──────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { font-size: 16px; scroll-behavior: smooth; }
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
 
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
@@ -63,6 +67,9 @@ body {
   line-height: 1.5;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  max-width: 100vw;
+  width: 100%;
 }
 
 a { color: inherit; text-decoration: none; }
@@ -73,6 +80,9 @@ input, select, textarea { font-family: inherit; }
 #app {
   display: flex;
   min-height: 100vh;
+  max-width: 100vw;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 /* Mobile top navigation header (hidden on desktop) */
@@ -209,6 +219,19 @@ input, select, textarea { font-family: inherit; }
   flex-shrink: 0;
 }
 
+.user-avatar-sm {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
 .user-name {
   font-size: 13px;
   font-weight: 600;
@@ -248,11 +271,18 @@ input, select, textarea { font-family: inherit; }
   margin-left: var(--sidebar-w);
   min-height: 100vh;
   background: var(--bg-base);
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .main-content.full-width {
   margin-left: 0;
 }
+
+/* Visibility helpers */
+.mobile-only { display: none !important; }
+.desktop-only { display: block; }
 
 /* ─── Page Header ───────────────────────────────────────────────────────── */
 .page-header {
@@ -786,7 +816,6 @@ tbody tr:hover { background: rgba(255,255,255,0.02); }
   grid-template-columns: 2fr 1fr;
   gap: 20px;
 }
-
 .info-list { display: flex; flex-direction: column; gap: 0; }
 
 .info-row {
@@ -1590,6 +1619,9 @@ tbody tr:hover { background: rgba(255,255,255,0.02); }
   .card {
     border-radius: var(--radius-md);
     margin-bottom: 14px;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: hidden;
   }
   .card-header {
     padding: 12px 14px;
@@ -1604,22 +1636,161 @@ tbody tr:hover { background: rgba(255,255,255,0.02); }
   }
   .card-body {
     padding: 14px;
+    min-width: 0;
+    max-width: 100%;
   }
   .detail-grid {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: 100% !important;
     gap: 14px !important;
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+  .detail-grid > * {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  /* Order Action Buttons 2x2 grid */
+  .order-header-actions {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+  .order-header-actions .btn {
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 42px !important;
+    padding: 8px 10px !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  /* Order Status Controls */
+  .order-status-wrapper {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    width: 100% !important;
+    margin-top: 4px;
+  }
+  .order-status-wrapper select {
+    flex: 1 !important;
+    min-width: 0 !important;
+    min-height: 42px !important;
+    font-size: 15px !important;
+  }
+  .order-status-wrapper button {
+    flex-shrink: 0 !important;
+    min-height: 42px !important;
+    padding: 8px 16px !important;
+  }
+
+  /* Responsive Work & Part Cards on Mobile */
+  .mobile-only {
+    display: block !important;
+  }
+  .desktop-only {
+    display: none !important;
+  }
+  .order-items-cards-list {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .order-item-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    box-sizing: border-box;
+    width: 100%;
+  }
+  .order-item-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .order-item-card-title {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text-primary);
+    line-height: 1.35;
+    word-break: break-word;
+  }
+  .order-item-card-price {
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--accent);
+    white-space: nowrap;
+    text-align: right;
+  }
+  .order-item-card-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    flex-wrap: wrap;
+  }
+  .order-item-card-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .order-item-card-footer select {
+    flex: 1;
+    min-width: 0;
+    min-height: 40px;
+    font-size: 15px !important;
+  }
+  .order-item-card-footer .item-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .order-item-card-footer .item-actions .btn {
+    min-height: 40px;
+    padding: 6px 12px;
+  }
+
+  /* Card Tabs on mobile */
+  .card-tabs {
+    display: flex;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .card-tab {
+    flex: 1 1 auto;
+    text-align: center;
+    padding: 12px 10px;
+    font-size: 13px;
+    white-space: nowrap;
   }
 
   /* Tables — Touch-friendly swipe */
   .table-wrap {
-    margin: 0 -12px;
-    border-radius: 0;
-    border-left: none;
-    border-right: none;
+    margin: 0 !important;
+    border-radius: var(--radius-sm);
+    max-width: 100% !important;
+    width: 100% !important;
+    overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    box-sizing: border-box;
   }
   table {
-    min-width: 580px;
+    min-width: 540px;
   }
   th, td {
     padding: 10px 12px;
@@ -1856,5 +2027,15 @@ tbody tr:hover { background: rgba(255,255,255,0.02); }
   }
   .page-header .flex .btn {
     min-width: 100%;
+  }
+}
+
+/* Исправление вёрстки на телефоне: страница не растягивается из-за таблицы работ */
+.detail-grid > * {
+  min-width: 0;
+}
+@media (max-width: 768px) {
+  .card .table-wrap {
+    margin: 0;
   }
 }

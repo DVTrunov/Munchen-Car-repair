@@ -243,7 +243,7 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
         <h1 class="page-title">Заказ-наряд #${order.id}</h1>
         <p class="page-subtitle">Создан ${App.formatDate(order.created_at)}</p>
       </div>
-      <div class="flex gap-2">
+      <div class="flex gap-2 order-header-actions">
         ${Permissions.can(App.user?.role, 'order.comments') ? `
         <button class="btn btn-sm btn-secondary" id="btn-comments" onclick="openCommentsDrawer(${order.id})">
           💬 Комментарии${(order.comments && order.comments.length > 0) ? ` <span style="background:var(--accent);color:#000;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">${order.comments.length}</span>` : ''}
@@ -283,9 +283,9 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
           <div class="card mb-4" style="${isUnassigned ? 'border-color:#ef4444;box-shadow:0 0 0 2px rgba(239,68,68,0.2)' : ''}">
             <div class="card-header">
               <span class="card-title">Данные клиента и автомобиля</span>
-              <div class="flex gap-2 align-items-center">
+              <div class="flex gap-2 align-items-center order-status-wrapper">
                 <span class="text-sm">Статус:</span>
-                <select class="form-control" id="order-status-select" style="width:auto;padding:4px 10px;font-size:13px">
+                <select class="form-control" id="order-status-select" style="width:auto;padding:6px 12px">
                   ${ORDER_STATUSES.map(s => `
                     <option value="${s.value}" ${order.status === s.value ? 'selected' : ''}>${s.label}</option>
                   `).join('')}
@@ -476,7 +476,35 @@ function _renderItemsTable(items, orderId, empMap, brand, model) {
     </div>`;
   }
   return `
-    <div class="table-wrap" style="border:none;border-radius:0">
+    <!-- Mobile Cards View -->
+    <div class="mobile-only order-items-cards-list">
+      ${items.map(item => `
+        <div class="order-item-card">
+          <div class="order-item-card-header">
+            <span class="order-item-card-title">${App.escHtml(item.work_name)}</span>
+            <span class="order-item-card-price">${App.formatMoney(item.price)}</span>
+          </div>
+          <div class="order-item-card-meta">
+            <span>👤 ${item.employee ? App.escHtml(item.employee.full_name) : '<span class="text-muted">Исполнитель не назначен</span>'}</span>
+          </div>
+          <div class="order-item-card-footer">
+            <select class="form-control item-status-select"
+              onchange="changeItemStatus(${orderId}, ${item.id}, this.value)">
+              ${ITEM_STATUSES.map(s => `
+                <option value="${s.value}" ${item.status === s.value ? 'selected' : ''}>${s.label}</option>
+              `).join('')}
+            </select>
+            <div class="item-actions">
+              <button class="btn btn-sm btn-secondary" onclick="showItemModal(${orderId}, ${item.id}, '${brand}', '${model}')" title="Изменить">✏️ Изм.</button>
+              <button class="btn btn-sm btn-danger" onclick="deleteItem(${orderId}, ${item.id})" title="Удалить">✕</button>
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+
+    <!-- Desktop Table View -->
+    <div class="desktop-only table-wrap" style="border:none;border-radius:0">
       <table class="items-table">
         <thead>
           <tr>
@@ -494,7 +522,7 @@ function _renderItemsTable(items, orderId, empMap, brand, model) {
               <td class="text-sm">${item.employee ? App.escHtml(item.employee.full_name) : '<span class="text-muted">—</span>'}</td>
               <td class="font-bold">${App.formatMoney(item.price)}</td>
               <td>
-                <select class="form-control" style="width:auto;padding:3px 8px;font-size:12px"
+                <select class="form-control" style="width:auto;padding:4px 8px"
                   onchange="changeItemStatus(${orderId}, ${item.id}, this.value)">
                   ${ITEM_STATUSES.map(s => `
                     <option value="${s.value}" ${item.status === s.value ? 'selected' : ''}>${s.label}</option>
@@ -522,7 +550,33 @@ function _renderPartsTable(parts, orderId) {
     </div>`;
   }
   return `
-    <div class="table-wrap" style="border:none;border-radius:0">
+    <!-- Mobile Cards View -->
+    <div class="mobile-only order-items-cards-list">
+      ${parts.map(p => {
+        const sum = Math.round(p.price * p.qty);
+        return `
+        <div class="order-item-card">
+          <div class="order-item-card-header">
+            <span class="order-item-card-title">${App.escHtml(p.name)}</span>
+            <span class="order-item-card-price">${App.formatMoney(sum)}</span>
+          </div>
+          <div class="order-item-card-meta">
+            <span>${p.article ? `<span class="badge" style="background:rgba(255,255,255,0.08);color:var(--text-secondary);font-size:11px;">Арт: ${App.escHtml(p.article)}</span>` : '<span class="text-muted">Без артикула</span>'}</span>
+            <span style="font-size:13px;color:var(--text-secondary);">${+p.qty} шт × ${App.formatMoney(p.price)}</span>
+          </div>
+          <div class="order-item-card-footer" style="justify-content:flex-end;">
+            <div class="item-actions">
+              <button class="btn btn-sm btn-secondary" onclick="showPartModal(${orderId}, ${p.id})">✏️ Изм.</button>
+              <button class="btn btn-sm btn-danger" onclick="deletePart(${orderId}, ${p.id})">✕</button>
+            </div>
+          </div>
+        </div>
+      `;
+      }).join('')}
+    </div>
+
+    <!-- Desktop Table View -->
+    <div class="desktop-only table-wrap" style="border:none;border-radius:0">
       <table class="items-table">
         <thead>
           <tr>
@@ -1413,7 +1467,7 @@ async function shareOrder(id) {
   if (btn) { btn.disabled = true; btn.textContent = '⏳ ...'; }
   try {
     const order = await App.api(`/orders/${id}/share`, { method: 'POST' });
-    const shareUrl = `${window.location.origin}/share/${order.sharing_token}`;
+    const shareUrl = order.share_url || `${window.location.origin}/share/${order.sharing_token}`;
     showShareModal(shareUrl);
   } catch (err) {
     App.toast(err.message || 'Не удалось создать ссылку', 'error');
@@ -1430,63 +1484,128 @@ function showShareModal(url) {
   const overlay = document.createElement('div');
   overlay.id = 'share-modal-overlay';
   overlay.style.cssText = `
-    position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;
-    display:flex;align-items:center;justify-content:center;padding:20px;
-    backdrop-filter:blur(4px);
+    position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;
+    display:flex;align-items:center;justify-content:center;padding:16px;
+    backdrop-filter:blur(6px);
   `;
   overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
 
+  const canShare = !!navigator.share;
+  const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent('Здравствуйте! Ссылка на ваш заказ-наряд: ' + url)}`;
+
   overlay.innerHTML = `
     <div style="background:var(--bg-card,#1a1d27);border:1px solid rgba(255,255,255,0.12);
-         border-radius:14px;padding:clamp(16px, 5vw, 28px);max-width:520px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.5);
-         animation:fadeInUp 0.2s ease;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-        <h3 style="font-size:16px;font-weight:700;color:var(--text,#e2e8f0);">🔗 Поделиться с клиентом</h3>
+         border-radius:16px;padding:clamp(16px, 5vw, 24px);max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.6);
+         animation:fadeInUp 0.2s ease;box-sizing:border-box;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <h3 style="font-size:17px;font-weight:700;color:var(--text-primary,#e2e8f0);margin:0;display:flex;align-items:center;gap:8px;">
+          <span>🔗</span> Ссылка для клиента
+        </h3>
         <button onclick="document.getElementById('share-modal-overlay').remove()"
-          style="background:none;border:none;color:var(--text-muted,#8892a4);cursor:pointer;font-size:22px;line-height:1;padding:4px;">✕</button>
+          style="background:none;border:none;color:var(--text-muted,#8892a4);cursor:pointer;font-size:24px;line-height:1;padding:4px;" aria-label="Закрыть">✕</button>
       </div>
-      <p style="font-size:13px;color:var(--text-muted,#8892a4);margin-bottom:16px;">
-        Клиент сможет просматривать статус заказа и оставлять комментарии без входа в систему.
+      <p style="font-size:13px;color:var(--text-secondary,#94a3b8);margin-bottom:16px;line-height:1.45;">
+        Клиент сможет просматривать статус заказа, состав работ и запчастей, а также оставлять комментарии без регистрации.
       </p>
-      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+
+      <div style="margin-bottom:14px;">
         <input id="share-url-input" readonly value="${url}"
-          style="flex:1 1 200px;min-width:0;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);
-                 border-radius:8px;padding:10px 12px;color:var(--text,#e2e8f0);font-size:14px;outline:none;
-                 font-family:monospace;">
-        <button id="share-copy-btn" onclick="copyShareLink('${url}')"
-          style="background:linear-gradient(135deg,#3182ce,#553c9a);color:#fff;border:none;
-                 border-radius:8px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer;
-                 white-space:nowrap;font-family:inherit;min-height:44px;flex:1 1 auto;">
-          Копировать
-        </button>
+          style="width:100%;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.12);
+                 border-radius:8px;padding:11px 12px;color:var(--text-primary,#e2e8f0);font-size:16px;outline:none;
+                 font-family:monospace;box-sizing:border-box;margin-bottom:10px;">
+        
+        <div style="display:grid;grid-template-columns:${canShare ? '1fr 1fr' : '1fr'};gap:8px;">
+          <button id="share-copy-btn" onclick="copyShareLink('${url}')"
+            style="background:linear-gradient(135deg,var(--accent,#f59e0b),#d97706);color:#0f1117;border:none;
+                   border-radius:8px;padding:11px 16px;font-size:14px;font-weight:700;cursor:pointer;
+                   display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;">
+            📋 Копировать
+          </button>
+          ${canShare ? `
+          <button id="share-native-btn" onclick="triggerNativeShare('${url}')"
+            style="background:rgba(255,255,255,0.08);color:var(--text-primary,#e2e8f0);border:1px solid rgba(255,255,255,0.15);
+                   border-radius:8px;padding:11px 16px;font-size:14px;font-weight:600;cursor:pointer;
+                   display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;">
+            📤 Поделиться
+          </button>` : ''}
+        </div>
+
+        <a href="${whatsappUrl}" target="_blank" rel="noopener noreferrer"
+          style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:8px;
+                 background:#25D366;color:#fff;text-decoration:none;border-radius:8px;padding:11px 16px;
+                 font-size:14px;font-weight:600;min-height:44px;box-sizing:border-box;">
+          💬 Отправить в WhatsApp
+        </a>
       </div>
-      <div id="share-copy-status" style="font-size:12px;color:#48bb78;text-align:center;min-height:18px;"></div>
+
+      <div id="share-copy-status" style="font-size:13px;text-align:center;min-height:20px;font-weight:500;"></div>
     </div>
   `;
 
   document.body.appendChild(overlay);
 
-  // Auto-select the URL
   setTimeout(() => {
     const input = document.getElementById('share-url-input');
-    if (input) input.select();
-  }, 50);
+    if (input) {
+      input.focus();
+      input.select();
+    }
+  }, 80);
 }
 
-function copyShareLink(url) {
-  navigator.clipboard.writeText(url).then(() => {
-    const btn = document.getElementById('share-copy-btn');
-    const status = document.getElementById('share-copy-status');
-    if (btn) btn.textContent = '✓ Скопировано!';
-    if (status) status.textContent = 'Ссылка скопирована в буфер обмена';
+async function copyShareLink(url) {
+  const btn = document.getElementById('share-copy-btn');
+  const status = document.getElementById('share-copy-status');
+  const input = document.getElementById('share-url-input');
+
+  const copied = await App.copyToClipboard(url);
+  if (copied) {
+    if (btn) {
+      btn.innerHTML = '✓ Скопировано!';
+      btn.style.background = '#10b981';
+      btn.style.color = '#fff';
+    }
+    if (status) {
+      status.style.color = '#10b981';
+      status.textContent = 'Ссылка скопирована в буфер обмена!';
+    }
+    App.toast('Ссылка скопирована в буфер');
     setTimeout(() => {
-      if (btn) btn.textContent = 'Копировать';
+      if (btn) {
+        btn.innerHTML = '📋 Копировать';
+        btn.style.background = 'linear-gradient(135deg,var(--accent,#f59e0b),#d97706)';
+        btn.style.color = '#0f1117';
+      }
       if (status) status.textContent = '';
     }, 2500);
-  }).catch(() => {
-    // Fallback for older browsers
-    const input = document.getElementById('share-url-input');
-    if (input) { input.select(); document.execCommand('copy'); }
-    App.toast('Ссылка скопирована');
-  });
+  } else {
+    // Fallback: select text for user
+    if (input) {
+      input.removeAttribute('readonly');
+      input.focus();
+      input.select();
+      input.setSelectionRange(0, 99999);
+      input.setAttribute('readonly', 'true');
+    }
+    if (btn) btn.innerHTML = 'Выделено';
+    if (status) {
+      status.style.color = 'var(--accent, #f59e0b)';
+      status.textContent = 'Зажмите ссылку и выберите «Скопировать»';
+    }
+    App.toast('Ссылка выделена. Зажмите и скопируйте', 'info');
+  }
+}
+
+async function triggerNativeShare(url) {
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: 'Заказ-наряд СТО München',
+        text: 'Ссылка на просмотр заказ-наряда в автосервисе München:',
+        url: url
+      });
+    } catch (err) {
+      // User cancelled
+    }
+  }
 }

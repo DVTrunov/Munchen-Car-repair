@@ -67,7 +67,7 @@ def get_summary(
         employee_stats.append({
             "id": emp.id,
             "full_name": emp.full_name,
-            "role": emp.role.value,
+            "role": emp.role.value if hasattr(emp.role, "value") else str(emp.role),
             "items_count": len(emp_items),
             "total_amount": emp_total,
             "estimated_salary": (

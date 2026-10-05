@@ -1,20 +1,13 @@
-# Секреты и локальные настройки
 .env
-
-# База данных
 *.db
 *.sqlite3
-
-# Виртуальное окружение и кэш Python
 venv/
 .venv/
 __pycache__/
 *.pyc
-
-# Пользовательские файлы и сгенерированные документы
 backend/uploads/
 backend/generated/
-backend/test_table.docx
-
-# Системный мусор
 .DS_Store
+*.bak
+*.patch
+backend/test_*.docx

@@ -22,6 +22,7 @@ const Permissions = (() => {
       'nav.services':  true,
       'nav.analytics': true,
       'nav.roles':     true,
+      'nav.users':     true,
       'print.placeholders': true,
       'print.upload':       true,
       'print.generate':     true,
@@ -36,6 +37,7 @@ const Permissions = (() => {
       'nav.services':  true,
       'nav.analytics': false,
       'nav.roles':     false,
+      'nav.users':     false,
       'print.placeholders': false,
       'print.upload':       false,
       'print.generate':     true,
@@ -50,6 +52,7 @@ const Permissions = (() => {
       'nav.services':  false,
       'nav.analytics': false,
       'nav.roles':     false,
+      'nav.users':     false,
       'print.placeholders': false,
       'print.upload':       false,
       'print.generate':     true,
@@ -73,6 +76,7 @@ const Permissions = (() => {
         { key: 'nav.services',  label: 'Услуги и Прайс' },
         { key: 'nav.analytics', label: 'Аналитика' },
         { key: 'nav.roles',     label: 'Управление ролями' },
+        { key: 'nav.users',     label: 'Пользователи' },
       ]
     },
     {

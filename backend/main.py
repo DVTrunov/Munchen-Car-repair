@@ -20,13 +20,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-
 load_dotenv()
 
 from database import engine, SessionLocal
 import models
 from auth import get_password_hash
-from routers import auth, clients, vehicles, orders, employees, analytics, services, service_categories, print_templates, shared
+from routers import auth, users, clients, vehicles, orders, employees, analytics, services, service_categories, print_templates, shared
 
 logging.basicConfig(
     level=logging.INFO,
@@ -159,6 +158,7 @@ if _allowed_origins:
 
 # ─── API routers ─────────────────────────────────────────────────────────────
 app.include_router(auth.router,      prefix="/api/auth",      tags=["auth"])
+app.include_router(users.router,     prefix="/api/users",     tags=["users"])
 app.include_router(clients.router,   prefix="/api/clients",   tags=["clients"])
 app.include_router(vehicles.router,  prefix="/api/vehicles",  tags=["vehicles"])
 app.include_router(orders.router,    prefix="/api/orders",    tags=["orders"])

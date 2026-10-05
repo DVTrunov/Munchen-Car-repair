@@ -72,6 +72,11 @@ def _order_to_out(order: models.Order) -> schemas.OrderOut:
     data = schemas.OrderOut.model_validate(order)
     data.services_total = services_total
     data.parts_total = parts_total
+
+    public_url = os.getenv("PUBLIC_URL", "").strip().rstrip("/")
+    if public_url and order.sharing_token:
+        data.share_url = f"{public_url}/share/{order.sharing_token}"
+
     return data
 
 

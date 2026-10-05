@@ -58,11 +58,6 @@ function renderLogin() {
             </button>
           </form>
 
-          <div class="login-hint">
-            <strong>По умолчанию:</strong><br/>
-            Владелец: <code>owner</code> / <code>owner123</code><br/>
-            Менеджер: <code>manager</code> / <code>manager123</code>
-          </div>
         </div>
       </div>
     </div>

@@ -49,8 +49,7 @@ async function loadEmployees() {
           <thead>
             <tr>
               <th>Сотрудник</th>
-              <th>Логин</th>
-              <th>Права доступа</th>
+              <th>Должность</th>
               <th>Тип оплаты</th>
               <th>Ставка</th>
               <th></th>
@@ -61,9 +60,6 @@ async function loadEmployees() {
               <tr>
                 <td class="td-primary">
                   <a href="#/employees/${e.id}" style="color:var(--accent)">${App.escHtml(e.full_name)}</a>
-                </td>
-                <td>
-                  ${e.username ? `<span class="badge" style="background:rgba(255,255,255,0.08);color:#e2e8f0;font-family:monospace;">🔑 ${App.escHtml(e.username)}</span>` : '<span class="text-muted" style="font-size:12px;">без входа</span>'}
                 </td>
                 <td>${App.statusBadge(e.role)}</td>
                 <td class="text-sm">${RATE_TYPE_LABELS[e.rate_type] || e.rate_type}</td>
@@ -213,7 +209,7 @@ async function showEmployeeModal(id = null) {
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>Должность / Права <span class="required">*</span></label>
+            <label>Должность <span class="required">*</span></label>
             <select name="role" class="form-control" required>
               <option value="mechanic" ${emp?.role === 'mechanic' ? 'selected' : ''}>Механик</option>
               <option value="manager"  ${emp?.role === 'manager' ? 'selected' : ''}>Менеджер</option>
@@ -234,30 +230,18 @@ async function showEmployeeModal(id = null) {
             value="${emp ? emp.rate_value : ''}"
             placeholder="Для % — от 0 до 100; для фикс. — сумма в тенге" />
         </div>
-
-        <div style="margin:20px 0 12px 0; border-top:1px solid var(--border); padding-top:16px;">
-          <h4 style="margin:0 0 6px 0; font-size:14px; color:var(--accent);">🔐 Учётная запись в системе</h4>
-          <p class="text-muted" style="font-size:12px; margin-bottom:12px;">Заполните, если сотруднику нужен логин и пароль для входа в программу</p>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Имя пользователя (логин)</label>
-              <input name="username" class="form-control" autocomplete="off"
-                value="${emp?.username ? App.escHtml(emp.username) : ''}"
-                placeholder="например, mechanic1" />
-            </div>
-            <div class="form-group">
-              <label>Пароль ${emp?.username ? '<span class="text-muted" style="font-size:11px;">(не менять — оставьте пустым)</span>' : ''}</label>
-              <input name="password" type="password" class="form-control" autocomplete="new-password"
-                placeholder="${emp?.username ? '••••••••' : 'Пароль'}" />
-            </div>
-          </div>
-        </div>
+        <p class="text-muted" style="font-size:12px;margin-top:12px;padding:10px;background:rgba(255,255,255,0.04);border-radius:8px;border-left:3px solid var(--accent);">
+          💡 Для выдачи логина/пароля перейдите в раздел <a href="#/users" style="color:var(--accent);">Пользователи</a> и привяжите учётную запись к этому сотруднику.
+        </p>
       </form>
     `,
     submitLabel: emp ? 'Сохранить' : 'Добавить',
     onSubmit: async () => {
       const data = App.formData('employee-form');
       data.rate_value = parseFloat(data.rate_value) || 0;
+      // Remove any legacy credential fields before sending
+      delete data.username;
+      delete data.password;
       try {
         if (id) {
           await App.api(`/employees/${id}`, { method: 'PUT', body: data });
