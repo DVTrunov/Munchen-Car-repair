@@ -179,7 +179,10 @@ async function loadOrders(filters = {}) {
                     ` : '<span class="badge badge-danger" style="background:rgba(239,68,68,0.2);color:#fca5a5">⚠️ Выберите клиента</span>'}
                   </td>
                   <td class="text-sm">
-                    ${hasVehicle ? App.vehicleLabel(o.vehicle) : '<span class="badge badge-danger" style="background:rgba(239,68,68,0.2);color:#fca5a5">⚠️ Выберите авто</span>'}
+                    ${hasVehicle ? `
+                      <div>${App.vehicleLabel(o.vehicle)}</div>
+                      ${o.mileage ? `<div class="text-xs text-muted" style="margin-top:2px">🛣️ ${o.mileage.toLocaleString('ru-RU')} км</div>` : ''}
+                    ` : '<span class="badge badge-danger" style="background:rgba(239,68,68,0.2);color:#fca5a5">⚠️ Выберите авто</span>'}
                   </td>
                   <td>${App.statusBadge(o.status)}</td>
                   <td class="td-primary font-bold">${App.formatMoney(o.total_amount)}</td>
@@ -337,6 +340,35 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
                 </div>
               </div>
 
+              <!-- Mileage Field -->
+              <div class="form-group mb-4">
+                <label style="display:flex;align-items:center;gap:6px">
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14" style="opacity:.6"><path d="M10 2a8 8 0 100 16A8 8 0 0010 2zm0 2a6 6 0 110 12A6 6 0 0110 4zm0 1a1 1 0 00-1 1v4.586l-2.707 2.707a1 1 0 101.414 1.414L10 12.414V8a1 1 0 00-1-1z"/></svg>
+                  Пробег (км)
+                </label>
+                <div class="flex gap-2">
+                  <input
+                    type="number"
+                    class="form-control"
+                    id="input-order-mileage"
+                    placeholder="Например: 85000"
+                    min="0"
+                    value="${order.mileage ?? ''}"
+                    style="max-width:200px"
+                  />
+                  <button class="btn btn-secondary" id="btn-save-mileage" style="flex-shrink:0">Сохранить</button>
+                </div>
+                ${order.mileage ? `<div class="text-sm text-muted" style="margin-top:4px">Текущий пробег: <strong>${order.mileage.toLocaleString('ru-RU')} км</strong></div>` : ''}
+                ${order.vehicle_id ? `
+                  <div style="margin-top:8px">
+                    <a href="#/vehicle-history/${order.vehicle_id}" style="font-size:12px;color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px">
+                      <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg>
+                      История обслуживания этого авто
+                    </a>
+                  </div>
+                ` : ''}
+              </div>
+
               <!-- Totals breakdown -->
               <div class="order-totals">
                 <div class="order-totals-row">
@@ -426,6 +458,33 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
       renderOrderDetail(order.id);
     } catch (err) {
       App.toast(err.message, 'error');
+    }
+  });
+
+  // Mileage save handler
+  const saveMileage = async () => {
+    const input = document.getElementById('input-order-mileage');
+    if (!input) return;
+    const val = input.value.trim();
+    const mileage = val === '' ? null : parseInt(val, 10);
+    if (mileage !== null && (isNaN(mileage) || mileage < 0)) {
+      App.toast('Введите корректный пробег (целое число ≥ 0)', 'error');
+      return;
+    }
+    try {
+      await App.api(`/orders/${order.id}`, { method: 'PUT', body: { mileage } });
+      App.toast('Пробег сохранён');
+      renderOrderDetail(order.id);
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
+  };
+
+  document.getElementById('btn-save-mileage')?.addEventListener('click', saveMileage);
+  document.getElementById('input-order-mileage')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveMileage();
     }
   });
 }

@@ -299,6 +299,7 @@ class OrderBase(BaseModel):
     vehicle_id: Optional[int] = None
     client_id: Optional[int] = None
     comment: Optional[str] = None
+    mileage: Optional[int] = None  # Пробег на момент обслуживания (км)
 
 
 class OrderCreate(OrderBase):
@@ -309,6 +310,7 @@ class OrderUpdate(BaseModel):
     client_id: Optional[int] = None
     vehicle_id: Optional[int] = None
     comment: Optional[str] = None
+    mileage: Optional[int] = None  # Пробег на момент обслуживания (км)
     status: Optional[OrderStatus] = None
 
 
@@ -380,6 +382,7 @@ class OrderListItem(BaseModel):
     created_at: datetime
     status: OrderStatus
     total_amount: float
+    mileage: Optional[int] = None
     client: Optional[ClientShort] = None
     vehicle: Optional[VehicleShort] = None
 

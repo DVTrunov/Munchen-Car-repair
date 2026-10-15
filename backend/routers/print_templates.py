@@ -33,22 +33,23 @@ os.makedirs(GENERATED_DIR, exist_ok=True)
 # ─── Placeholders List ────────────────────────────────────────────────────────
 
 PLACEHOLDERS = [
-    {"key": "{{order_id}}",       "description": "Номер заказ-наряда"},
-    {"key": "{{order_date}}",     "description": "Дата создания заказа"},
-    {"key": "{{order_status}}",   "description": "Статус заказа (на русском)"},
-    {"key": "{{comment}}",        "description": "Общий комментарий к заказу"},
-    {"key": "{{client_name}}",    "description": "ФИО клиента"},
-    {"key": "{{client_phone}}",   "description": "Телефон клиента"},
-    {"key": "{{vehicle_brand}}",  "description": "Марка автомобиля"},
-    {"key": "{{vehicle_model}}",  "description": "Модель автомобиля"},
-    {"key": "{{vehicle_plate}}",  "description": "Государственный номер"},
-    {"key": "{{vehicle_vin}}",    "description": "VIN-номер"},
-    {"key": "{{vehicle_year}}",   "description": "Год выпуска"},
-    {"key": "{{services_total}}", "description": "Сумма работ (₸)"},
-    {"key": "{{parts_total}}",    "description": "Сумма запчастей (₸)"},
-    {"key": "{{total_amount}}",   "description": "Итоговая сумма (₸)"},
-    {"key": "{{table_services}}", "description": "Таблица выполненных работ (вставляется автоматически)"},
-    {"key": "{{table_parts}}",    "description": "Таблица запчастей и материалов (вставляется автоматически)"},
+    {"key": "{{order_id}}",         "description": "Номер заказ-наряда"},
+    {"key": "{{order_date}}",       "description": "Дата создания заказа"},
+    {"key": "{{order_status}}",     "description": "Статус заказа (на русском)"},
+    {"key": "{{comment}}",          "description": "Общий комментарий к заказу"},
+    {"key": "{{client_name}}",      "description": "ФИО клиента"},
+    {"key": "{{client_phone}}",     "description": "Телефон клиента"},
+    {"key": "{{vehicle_brand}}",    "description": "Марка автомобиля"},
+    {"key": "{{vehicle_model}}",    "description": "Модель автомобиля"},
+    {"key": "{{vehicle_plate}}",    "description": "Государственный номер"},
+    {"key": "{{vehicle_vin}}",      "description": "VIN-номер"},
+    {"key": "{{vehicle_year}}",     "description": "Год выпуска"},
+    {"key": "{{vehicle_mileage}}",  "description": "Пробег автомобиля (км)"},
+    {"key": "{{services_total}}",   "description": "Сумма работ (₸)"},
+    {"key": "{{parts_total}}",      "description": "Сумма запчастей (₸)"},
+    {"key": "{{total_amount}}",     "description": "Итоговая сумма (₸)"},
+    {"key": "{{table_services}}",   "description": "Таблица выполненных работ (вставляется автоматически)"},
+    {"key": "{{table_parts}}",      "description": "Таблица запчастей и материалов (вставляется автоматически)"},
 ]
 
 STATUS_LABELS = {
@@ -197,20 +198,24 @@ def generate_order_doc(
     comments_str = "\n".join(comments_list) if comments_list else "—"
 
     replacements: Dict[str, str] = {
-        "{{order_id}}":       str(order.id),
-        "{{order_date}}":     order.created_at.strftime("%d.%m.%Y"),
-        "{{order_status}}":   STATUS_LABELS.get(order.status.value, order.status.value),
-        "{{comment}}":        comments_str,
-        "{{client_name}}":    order.client.full_name if order.client else "—",
-        "{{client_phone}}":   order.client.phone if order.client else "—",
-        "{{vehicle_brand}}":  order.vehicle.brand if order.vehicle else "—",
-        "{{vehicle_model}}":  order.vehicle.model if order.vehicle else "—",
-        "{{vehicle_plate}}":  (order.vehicle.plate_number or "—") if order.vehicle else "—",
-        "{{vehicle_vin}}":    (order.vehicle.vin or "—") if order.vehicle else "—",
-        "{{vehicle_year}}":   str(order.vehicle.year) if order.vehicle and order.vehicle.year else "—",
-        "{{services_total}}": f"{services_total:,.0f} ₸",
-        "{{parts_total}}":    f"{parts_total:,.0f} ₸",
-        "{{total_amount}}":   f"{total_amount:,.0f} ₸",
+        "{{order_id}}":         str(order.id),
+        "{{order_date}}":       order.created_at.strftime("%d.%m.%Y"),
+        "{{order_status}}":     STATUS_LABELS.get(order.status.value, order.status.value),
+        "{{comment}}":          comments_str,
+        "{{client_name}}":      order.client.full_name if order.client else "—",
+        "{{client_phone}}":     order.client.phone if order.client else "—",
+        "{{vehicle_brand}}":    order.vehicle.brand if order.vehicle else "—",
+        "{{vehicle_model}}":    order.vehicle.model if order.vehicle else "—",
+        "{{vehicle_plate}}":    (order.vehicle.plate_number or "—") if order.vehicle else "—",
+        "{{vehicle_vin}}":      (order.vehicle.vin or "—") if order.vehicle else "—",
+        "{{vehicle_year}}":     str(order.vehicle.year) if order.vehicle and order.vehicle.year else "—",
+        "{{vehicle_mileage}}": f"{order.mileage:,} км".replace(',', ' ') if order.mileage else "—",
+        "{{services_total}} ₸": f"{services_total:,.0f} ₸".replace(',', ' '),
+        "{{parts_total}} ₸":    f"{parts_total:,.0f} ₸".replace(',', ' '),
+        "{{total_amount}} ₸":   f"{total_amount:,.0f} ₸".replace(',', ' '),
+        "{{services_total}}":   f"{services_total:,.0f} ₸".replace(',', ' '),
+        "{{parts_total}}":      f"{parts_total:,.0f} ₸".replace(',', ' '),
+        "{{total_amount}}":     f"{total_amount:,.0f} ₸".replace(',', ' '),
     }
 
     doc = Document(TEMPLATE_FILE)
@@ -224,6 +229,9 @@ def generate_order_doc(
             return
         for key, value in replacements.items():
             full_text = full_text.replace(key, value)
+
+        # Remove any accidental double currency symbols
+        full_text = full_text.replace("₸ ₸", "₸").replace("₸₸", "₸")
 
         if para.runs:
             first_run = para.runs[0]

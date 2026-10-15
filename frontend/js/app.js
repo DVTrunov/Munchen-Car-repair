@@ -150,6 +150,15 @@ const App = {
       if (id) return renderOrderDetail(id);
     }
 
+    if (path === '/vehicle-history' || path === '/vehicle-history/') {
+      return renderVehicleHistoryIndex();
+    }
+
+    if (path.startsWith('/vehicle-history/')) {
+      const id = parseInt(path.split('/')[2]);
+      if (id) return renderVehicleHistory(id);
+    }
+
     if (path === '/analytics') {
       if (this.isOwner()) return renderAnalytics();
       else return renderOrders();
@@ -215,13 +224,14 @@ const App = {
 
     // Permission-based nav visibility
     const navMap = {
-      'nav-orders':    'nav.orders',
-      'nav-clients':   'nav.clients',
-      'nav-employees': 'nav.employees',
-      'nav-services':  'nav.services',
-      'nav-analytics': 'nav.analytics',
-      'nav-roles':     'nav.roles',
-      'nav-users':     'nav.users',
+      'nav-orders':          'nav.orders',
+      'nav-clients':         'nav.clients',
+      'nav-vehicle-history': 'nav.clients',
+      'nav-employees':       'nav.employees',
+      'nav-services':        'nav.services',
+      'nav-analytics':       'nav.analytics',
+      'nav-roles':           'nav.roles',
+      'nav-users':           'nav.users',
     };
     for (const [elId, feat] of Object.entries(navMap)) {
       const el = document.getElementById(elId);

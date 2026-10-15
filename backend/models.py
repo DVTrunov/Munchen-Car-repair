@@ -119,6 +119,7 @@ class Order(Base):
     status = Column(SAEnum(OrderStatus), default=OrderStatus.new, nullable=False)
     total_amount = Column(Float, default=0.0, nullable=False)
     comment = Column(Text, nullable=True)
+    mileage = Column(Integer, nullable=True)  # Пробег автомобиля на момент обслуживания
     sharing_token = Column(String(36), nullable=True, unique=True, index=True)  # UUID for public share link
 
     vehicle = relationship("Vehicle", back_populates="orders")

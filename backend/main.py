@@ -25,7 +25,7 @@ load_dotenv()
 from database import engine, SessionLocal
 import models
 from auth import get_password_hash
-from routers import auth, users, clients, vehicles, orders, employees, analytics, services, service_categories, print_templates, shared
+from routers import auth, users, clients, vehicles, orders, employees, analytics, services, service_categories, print_templates, shared, vehicle_history
 
 logging.basicConfig(
     level=logging.INFO,
@@ -65,6 +65,19 @@ def seed_database() -> None:
             logger.info("Добавлена колонка sharing_token в таблицу orders")
     except Exception as e:
         logger.warning(f"Миграция sharing_token: {e}")
+
+    # Ensure mileage column exists in orders table for existing databases
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(engine)
+        cols = [c["name"] for c in inspector.get_columns("orders")]
+        if "mileage" not in cols:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE orders ADD COLUMN mileage INTEGER"))
+                conn.commit()
+            logger.info("Добавлена колонка mileage в таблицу orders")
+    except Exception as e:
+        logger.warning(f"Миграция mileage: {e}")
 
     db = SessionLocal()
     try:
@@ -167,7 +180,8 @@ app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"]
 app.include_router(services.router,  prefix="/api/services",  tags=["services"])
 app.include_router(service_categories.router, prefix="/api/service-categories", tags=["service-categories"])
 app.include_router(print_templates.router, prefix="/api/print-templates", tags=["print-templates"])
-app.include_router(shared.router,    prefix="/api/shared",    tags=["shared"])
+app.include_router(shared.router,          prefix="/api/shared",          tags=["shared"])
+app.include_router(vehicle_history.router, prefix="/api/vehicle-history",  tags=["vehicle-history"])
 
 
 # ─── Static uploads (user uploaded images) ────────────────────────────────────

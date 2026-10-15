@@ -195,6 +195,9 @@ function renderVehiclesList(vehicles, clientId) {
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
         <strong>${App.escHtml(v.brand)} ${App.escHtml(v.model)}${v.year ? ` (${v.year})` : ''}</strong>
         <div class="flex gap-2">
+          <button class="btn btn-sm btn-secondary" onclick="App.navigate('/vehicle-history/${v.id}')" title="История обслуживания">
+            📋 История
+          </button>
           <button class="btn btn-sm btn-secondary" onclick="showVehicleModal(${clientId}, ${v.id})">Изм.</button>
           <button class="btn btn-sm btn-danger" onclick="deleteVehicle(${v.id}, ${clientId})">Удалить</button>
         </div>
