@@ -690,14 +690,13 @@ function renderPartsTable(parts) {
     const rows = parts.map(p => `
         <tr>
             <td>${escapeHtml(p.name)}</td>
-            <td>${escapeHtml(p.article || '—')}</td>
             <td class="text-right">${p.qty}</td>
             <td class="text-right">${formatMoney(p.price)}</td>
             <td class="text-right">${formatMoney(p.qty * p.price)}</td>
         </tr>`).join('');
     return `<div class="table-wrap"><table class="data-table">
         <thead><tr>
-            <th>Наименование</th><th>Артикул</th>
+            <th>Наименование</th>
             <th class="text-right">Кол-во</th>
             <th class="text-right">Цена</th>
             <th class="text-right">Сумма</th>

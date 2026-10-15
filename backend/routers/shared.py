@@ -36,6 +36,9 @@ def _order_to_out(order: models.Order) -> schemas.OrderOut:
     data = schemas.OrderOut.model_validate(order)
     data.services_total = services_total
     data.parts_total = parts_total
+    # Скрываем артикулы запчастей от клиента при доступе по ссылке
+    for part in data.parts:
+        part.article = None
     return data
 
 

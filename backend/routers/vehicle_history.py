@@ -369,9 +369,9 @@ def export_vehicle_history(
 
             # ── Parts table ──
             if order.parts:
-                parts_table = doc.add_table(rows=1, cols=4)
+                parts_table = doc.add_table(rows=1, cols=3)
                 hdr = parts_table.rows[0].cells
-                for i, (cell, text) in enumerate(zip(hdr, ["Запчасть / Материал", "Арт.", "Кол-во", "Сумма (₸)"])):
+                for i, (cell, text) in enumerate(zip(hdr, ["Запчасть / Материал", "Кол-во", "Сумма (₸)"])):
                     cell.text = text
                     set_cell_background(cell, "FFF8EE")
                     set_cell_padding(cell, top=60, bottom=60, left=100, right=60)
@@ -379,23 +379,22 @@ def export_vehicle_history(
                     for p in cell.paragraphs:
                         for r in p.runs:
                             set_font(r, 8, bold=True, color=(0x55, 0x44, 0x22))
-                    if i == 3:
+                    if i == 2:
                         for p in cell.paragraphs:
                             p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
                 for part in order.parts:
                     row = parts_table.add_row()
                     row.cells[0].text = part.name
-                    row.cells[1].text = part.article or "—"
-                    row.cells[2].text = str(part.qty).rstrip("0").rstrip(".")
-                    row.cells[3].text = f"{part.price * part.qty:,.0f}".replace(",", " ")
+                    row.cells[1].text = str(part.qty).rstrip("0").rstrip(".")
+                    row.cells[2].text = f"{part.price * part.qty:,.0f}".replace(",", " ")
                     for j, cell in enumerate(row.cells):
                         set_cell_padding(cell, top=50, bottom=50, left=100, right=60)
                         set_cell_borders(cell, "EEDDCC")
                         for p in cell.paragraphs:
                             for r in p.runs:
                                 set_font(r, 9)
-                        if j == 3:
+                        if j == 2:
                             for p in cell.paragraphs:
                                 p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 

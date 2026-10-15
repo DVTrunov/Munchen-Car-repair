@@ -283,22 +283,20 @@ def generate_order_doc(
         parent = tbl_para.getparent()
         idx = list(parent).index(tbl_para)
 
-        table = doc.add_table(rows=1, cols=5)
+        table = doc.add_table(rows=1, cols=4)
 
         hdr = table.rows[0].cells
         hdr[0].text = "Наименование"
-        hdr[1].text = "Артикул"
-        hdr[2].text = "Кол-во"
-        hdr[3].text = "Цена (₸)"
-        hdr[4].text = "Сумма (₸)"
+        hdr[1].text = "Кол-во"
+        hdr[2].text = "Цена (₸)"
+        hdr[3].text = "Сумма (₸)"
 
         for part in order.parts:
             row = table.add_row().cells
             row[0].text = part.name
-            row[1].text = part.article or "—"
-            row[2].text = str(part.qty).rstrip("0").rstrip(".")
-            row[3].text = f"{part.price:,.0f}"
-            row[4].text = f"{part.price * part.qty:,.0f}"
+            row[1].text = str(part.qty).rstrip("0").rstrip(".")
+            row[2].text = f"{part.price:,.0f}".replace(",", " ")
+            row[3].text = f"{part.price * part.qty:,.0f}".replace(",", " ")
 
         apply_table_style(table)
 
