@@ -157,6 +157,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+@app.middleware("http")
+async def no_stale_frontend(request, call_next):
+    """Браузер перепроверяет HTML/JS/CSS при каждом открытии,
+    чтобы после обновления CRM не нужно было чистить кэш."""
+    response = await call_next(request)
+    path = request.url.path
+    if not path.startswith(("/api", "/uploads")):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 # CORS: фронтенд отдаётся этим же сервером, поэтому CORS нужен только если
 # API вызывается с другого домена. Список доменов — в ALLOWED_ORIGINS через запятую.
 _allowed_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
