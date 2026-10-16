@@ -213,6 +213,7 @@ class ServiceRefShort(BaseModel):
 class OrderItemOut(OrderItemBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    completed_at: Optional[datetime] = None
     employee: Optional[EmployeeShort] = None
     service: Optional[ServiceRefShort] = None
 
@@ -368,6 +369,7 @@ class OrderOut(OrderBase):
     parts_total: float = 0.0
     sharing_token: Optional[str] = None
     share_url: Optional[str] = None
+    scoped: bool = False  # True — пользователь видит только свои работы в заказе
     client: Optional[ClientShort] = None
     vehicle: Optional[VehicleShort] = None
     items: List[OrderItemOut] = []

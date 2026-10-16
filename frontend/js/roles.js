@@ -110,6 +110,7 @@ function renderRolePane(roleObj) {
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:10px;">
           ${group.features.map(feat => {
+            if (feat.type === 'select') return renderSelectPermission(role, rolePerms, feat, isOwner);
             const checked = rolePerms[feat.key] !== false;
             const disabled = isOwner; // owner always has everything
             return `
@@ -142,6 +143,23 @@ function renderRolePane(roleObj) {
       </div>
     `).join('')}
   `;
+}
+
+function renderSelectPermission(role, rolePerms, feat, isOwner) {
+  const value = isOwner ? 'all' : Permissions.getValue(role, feat.key);
+  return `
+    <label style="display:flex;flex-direction:column;gap:8px;padding:12px 14px;grid-column:1/-1;
+                   border-radius:10px;border:1px solid var(--border-color);
+                   background:var(--bg-secondary);${isOwner ? 'opacity:0.65;' : ''}">
+      <div style="font-size:13px;font-weight:500;color:var(--text-primary);line-height:1.4;">${feat.label}</div>
+      <select class="form-control" data-role="${role}" data-feature="${feat.key}" ${isOwner ? 'disabled' : ''}
+        style="max-width:460px;">
+        ${feat.options.map(o => `<option value="${o.value}" ${o.value === value ? 'selected' : ''}>${o.label}</option>`).join('')}
+      </select>
+      <div style="font-size:11px;color:var(--text-secondary);">
+        ${isOwner ? 'Владелец всегда видит все заказ-наряды' : (feat.hint || feat.key)}
+      </div>
+    </label>`;
 }
 
 function switchRoleTab(role) {
@@ -179,14 +197,19 @@ function collectPermissions() {
     const role = cb.dataset.role;
     const feat = cb.dataset.feature;
     if (!data[role]) data[role] = {};
-    data[role][feat] = cb.checked;
+    data[role][feat] = cb.tagName === 'SELECT' ? cb.value : cb.checked;
   });
   return data;
 }
 
-function saveRolePermissions() {
+async function saveRolePermissions() {
   const data = collectPermissions();
-  Permissions.saveAll(data);
+  try {
+    await Permissions.saveAll(data);
+  } catch (err) {
+    App.toast(err.message, 'error');
+    return;
+  }
 
   if (typeof App !== 'undefined' && typeof App.applyPermissionsToUI === 'function') {
     App.applyPermissionsToUI();
@@ -206,9 +229,14 @@ function saveRolePermissions() {
   App.toast('Права доступа сохранены');
 }
 
-function resetRolePermissions() {
+async function resetRolePermissions() {
   if (!confirm('Сбросить все настройки прав к рекомендуемым значениям? (Кастомные роли сохранятся)')) return;
-  Permissions.resetDefaults();
+  try {
+    await Permissions.resetDefaults();
+  } catch (err) {
+    App.toast(err.message, 'error');
+    return;
+  }
   renderRoles(activeRoleTab);
   App.toast('Настройки сброшены к умолчаниям');
 }
@@ -258,7 +286,7 @@ function showAddRoleModal() {
       </form>
     `,
     submitLabel: 'Создать роль',
-    onSubmit: () => {
+    onSubmit: async () => {
       const form = document.getElementById('add-role-form');
       const label = form.label.value.trim();
       let id = form.id.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
@@ -274,7 +302,7 @@ function showAddRoleModal() {
       }
 
       try {
-        const newRoleId = Permissions.addRole({ id, label, icon, copyFrom });
+        const newRoleId = await Permissions.addRole({ id, label, icon, copyFrom });
         App.closeModal();
         App.toast(`Роль «${label}» успешно создана!`);
         renderRoles(newRoleId);
@@ -325,7 +353,7 @@ function showEditRoleModal(roleId) {
       </form>
     `,
     submitLabel: 'Сохранить',
-    onSubmit: () => {
+    onSubmit: async () => {
       const form = document.getElementById('edit-role-form');
       const label = form.label.value.trim();
       const icon = form.icon.value.trim() || '👤';
@@ -336,7 +364,7 @@ function showEditRoleModal(roleId) {
       }
 
       try {
-        Permissions.updateRole(roleId, { label, icon });
+        await Permissions.updateRole(roleId, { label, icon });
         App.closeModal();
         App.toast(`Роль «${label}» обновлена`);
         renderRoles(roleId);
@@ -347,11 +375,11 @@ function showEditRoleModal(roleId) {
   });
 }
 
-function deleteCustomRole(roleId, roleLabel) {
+async function deleteCustomRole(roleId, roleLabel) {
   if (!confirm(`Вы действительно хотите удалить роль «${roleLabel}»?`)) return;
 
   try {
-    Permissions.deleteRole(roleId);
+    await Permissions.deleteRole(roleId);
     App.toast(`Роль «${roleLabel}» удалена`);
     renderRoles('owner');
   } catch (err) {
