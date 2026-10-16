@@ -31,8 +31,8 @@ os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 def _recalc_total(order: models.Order) -> None:
     """Recalculate and save order total_amount from items + parts."""
-    services_total = sum(item.price for item in order.items)
-    parts_total = sum(part.price * part.qty for part in order.parts)
+    services_total = sum(item.amount for item in order.items)
+    parts_total = sum(part.amount for part in order.parts)
     order.total_amount = round(services_total + parts_total, 2)
 
 
@@ -72,8 +72,8 @@ def _order_to_out(order: models.Order, access: OrderAccess) -> schemas.OrderOut:
     а суммы считаются только по ним.
     """
     items = access.visible_items(order)
-    services_total = round(sum(item.price for item in items), 2)
-    parts_total = round(sum(p.price * p.qty for p in order.parts), 2)
+    services_total = round(sum(item.amount for item in items), 2)
+    parts_total = round(sum(p.amount for p in order.parts), 2)
 
     data = schemas.OrderOut.model_validate(order)
     data.services_total = services_total
@@ -127,6 +127,17 @@ def _check_item_employee(access: OrderAccess, employee_id: Optional[int]) -> Non
         raise HTTPException(status_code=403, detail="Можно назначать работы только на себя")
 
 
+def _check_pricing_change(access: OrderAccess, current, changes: dict) -> None:
+    """Скидки и «100% механику» меняют деньги — роли «только свои работы» это запрещено."""
+    if not access.is_scoped:
+        return
+    for field, default in (("discount", 0), ("full_rate", False)):
+        if field in changes:
+            before = getattr(current, field) if current is not None else default
+            if (changes[field] or default) != (before or default):
+                raise HTTPException(status_code=403, detail="Скидки и оплату 100% может менять только менеджер или владелец")
+
+
 # ─── Orders ──────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=List[schemas.OrderListItem])
@@ -161,7 +172,7 @@ def list_orders(
     result = []
     for order in orders:
         row = schemas.OrderListItem.model_validate(order)
-        row.total_amount = round(sum(i.price for i in access.visible_items(order)), 2)
+        row.total_amount = round(sum(i.amount for i in access.visible_items(order)), 2)
         result.append(row)
     return result
 
@@ -266,6 +277,7 @@ def add_order_item(
 ):
     order = _get_order(db, order_id, access)
     _check_item_employee(access, data.employee_id)
+    _check_pricing_change(access, None, data.model_dump())
 
     item = models.OrderItem(order_id=order_id, **data.model_dump())
     _sync_completed_at(item)
@@ -289,6 +301,7 @@ def update_order_item(
     updates = data.model_dump(exclude_unset=True)
     if "employee_id" in updates:
         _check_item_employee(access, updates["employee_id"])
+    _check_pricing_change(access, item, updates)
 
     for key, value in updates.items():
         setattr(item, key, value)
@@ -337,6 +350,7 @@ def add_part(
     access: OrderAccess = Depends(get_order_access),
 ):
     order = _get_order(db, order_id, access)
+    _check_pricing_change(access, None, data.model_dump())
 
     part = models.OrderPart(order_id=order_id, **data.model_dump())
     db.add(part)
@@ -364,7 +378,9 @@ def update_part(
     if not part:
         raise HTTPException(status_code=404, detail="Запчасть не найдена")
 
-    for key, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    _check_pricing_change(access, part, updates)
+    for key, value in updates.items():
         setattr(part, key, value)
 
     db.flush()
@@ -463,6 +479,33 @@ def delete_comment(
 
     db.delete(comment)
     db.commit()
+
+
+# ─── Скидка на все позиции ─────────────────────────────────────────────────
+
+@router.post("/{order_id}/discount", response_model=schemas.OrderOut)
+def apply_bulk_discount(
+    order_id: int,
+    data: schemas.BulkDiscount,
+    db: Session = Depends(get_db),
+    access: OrderAccess = Depends(get_order_access),
+):
+    """Ставит одну скидку на все работы или на все запчасти заказа."""
+    access.require_full_access()
+    order = _get_order(db, order_id, access)
+    if data.target == "items":
+        rows = order.items
+    elif data.target == "parts":
+        rows = order.parts
+    else:
+        raise HTTPException(status_code=422, detail="target должен быть items или parts")
+    for row in rows:
+        row.discount = data.discount
+    db.flush()
+    _recalc_total(order)
+    db.commit()
+    db.refresh(order)
+    return _order_to_out(order, access)
 
 
 # ─── Пересчёт цен под текущий автомобиль ──────────────────────────────────────

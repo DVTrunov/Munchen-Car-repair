@@ -164,12 +164,8 @@ def get_employee_workload(
         .filter(models.OrderItem.employee_id == employee_id)
         .all()
     )
-    total_amount = sum(item.price for item in items)
-
-    if employee.rate_type == models.RateType.percent:
-        estimated_salary = total_amount * employee.rate_value / 100
-    else:
-        estimated_salary = employee.rate_value  # fixed regardless of workload
+    total_amount = round(sum(item.amount for item in items), 2)
+    estimated_salary = employee.salary_for(items)
 
     emp_role_str = employee.role.value if hasattr(employee.role, 'value') else str(employee.role)
     return {
@@ -186,6 +182,9 @@ def get_employee_workload(
                 "order_id": item.order_id,
                 "work_name": item.work_name,
                 "price": item.price,
+                "discount": item.discount,
+                "amount": item.amount,
+                "full_rate": item.full_rate,
                 "status": item.status.value if hasattr(item.status, 'value') else str(item.status),
             }
             for item in items
@@ -241,8 +240,7 @@ def get_employee_report(
         .all()
     )
 
-    is_percent = employee.rate_type == models.RateType.percent
-    total_amount = round(sum(i.price for i in done_items), 2)
+    total_amount = round(sum(i.amount for i in done_items), 2)
 
     def vehicle_label(order: models.Order) -> Optional[str]:
         v = order.vehicle
@@ -267,14 +265,17 @@ def get_employee_report(
                 "vehicle": vehicle_label(i.order),
                 "completed_at": i.completed_at or i.order.created_at,
                 "price": i.price,
-                "earning": round(i.price * employee.rate_value / 100, 2) if is_percent else None,
+                "discount": i.discount,
+                "amount": i.amount,
+                "full_rate": i.full_rate,
+                "earning": employee.earning_for(i),
             }
             for i in done_items
         ],
         "works_count": len(done_items),
         "total_amount": total_amount,
-        # При фиксированной ставке заработок от работ не зависит — отдаём оклад за месяц
-        "salary": round(total_amount * employee.rate_value / 100, 2) if is_percent else employee.rate_value,
+        # Фикс. ставка: оклад за месяц плюс работы, отданные на 100%
+        "salary": employee.salary_for(done_items),
         "unfinished_count": len(unfinished),
-        "unfinished_amount": round(sum(i.price for i in unfinished), 2),
+        "unfinished_amount": round(sum(i.amount for i in unfinished), 2),
     }

@@ -67,6 +67,10 @@ async function loadMyReport() {
 function _renderMyReport(data) {
   const emp = data.employee;
   const isPercent = emp.rate_type === 'percent';
+  // Колонка заработка нужна при процентной ставке или если есть работы, отданные на 100%
+  const showEarning = isPercent || data.items.some(i => i.earning != null);
+  const earningText = i => i.earning != null ? App.formatMoney(i.earning) : '<span class="text-muted">в окладе</span>';
+  const rateBadge = i => i.full_rate ? ' <span class="badge" style="background:rgba(72,187,120,0.15);color:#48bb78;font-size:10px">100%</span>' : '';
   const period = `${App.formatDateOnly(data.date_from)} — ${App.formatDateOnly(data.date_to)}`;
 
   return `
@@ -90,7 +94,7 @@ function _renderMyReport(data) {
         <div>
           <div class="stat-label">${isPercent ? 'Вы получите' : 'Оклад'}</div>
           <div class="stat-value">${App.formatMoney(data.salary)}</div>
-          <div class="stat-sub">${isPercent ? `${emp.rate_value}% от суммы работ` : 'Фиксированная ставка в месяц'}</div>
+          <div class="stat-sub">${isPercent ? `${emp.rate_value}% от суммы работ` : 'Оклад в месяц + работы на 100%'}${data.items.some(i => i.full_rate) ? ' · есть работы на 100%' : ''}</div>
         </div>
       </div>
     </div>
@@ -113,12 +117,12 @@ function _renderMyReport(data) {
           ${data.items.map(i => `
             <div class="order-item-card" onclick="App.navigate('/orders/${i.order_id}')" style="cursor:pointer">
               <div class="order-item-card-header">
-                <span class="order-item-card-title">${App.escHtml(i.work_name)}</span>
-                <span class="order-item-card-price">${App.formatMoney(i.price)}</span>
+                <span class="order-item-card-title">${App.escHtml(i.work_name)}${rateBadge(i)}</span>
+                <span class="order-item-card-price">${App.formatMoney(i.amount)}</span>
               </div>
               <div class="order-item-card-meta">
                 <span>№${i.order_id} · ${App.formatDateOnly(i.completed_at)}${i.vehicle ? ` · ${App.escHtml(i.vehicle)}` : ''}</span>
-                ${isPercent ? `<span>Ваши: <strong>${App.formatMoney(i.earning)}</strong></span>` : ''}
+                ${showEarning ? `<span>Ваши: <strong>${earningText(i)}</strong></span>` : ''}
               </div>
             </div>
           `).join('')}
@@ -132,7 +136,7 @@ function _renderMyReport(data) {
                 <th>Автомобиль</th>
                 <th>Работа</th>
                 <th>Сумма</th>
-                ${isPercent ? '<th>Ваш заработок</th>' : ''}
+                ${showEarning ? '<th>Ваш заработок</th>' : ''}
               </tr>
             </thead>
             <tbody>
@@ -141,9 +145,9 @@ function _renderMyReport(data) {
                   <td class="text-sm">${App.formatDateOnly(i.completed_at)}</td>
                   <td><a href="#/orders/${i.order_id}" style="color:var(--accent)">№${i.order_id}</a></td>
                   <td class="text-sm">${i.vehicle ? App.escHtml(i.vehicle) : '<span class="text-muted">—</span>'}</td>
-                  <td class="td-primary">${App.escHtml(i.work_name)}</td>
-                  <td class="font-bold">${App.formatMoney(i.price)}</td>
-                  ${isPercent ? `<td class="font-bold">${App.formatMoney(i.earning)}</td>` : ''}
+                  <td class="td-primary">${App.escHtml(i.work_name)}${rateBadge(i)}${i.discount ? ` <span class="text-muted text-sm">−${+i.discount}%</span>` : ''}</td>
+                  <td class="font-bold">${App.formatMoney(i.amount)}</td>
+                  ${showEarning ? `<td class="font-bold">${earningText(i)}</td>` : ''}
                 </tr>
               `).join('')}
             </tbody>

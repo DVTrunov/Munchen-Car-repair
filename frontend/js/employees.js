@@ -125,7 +125,7 @@ async function renderEmployeeDetail(id) {
             <div>
               <div class="stat-label">К выплате</div>
               <div class="stat-value">${App.formatMoney(data.estimated_salary)}</div>
-              <div class="stat-sub">${emp.rate_type === 'percent' ? emp.rate_value + '% от суммы' : 'Фикс. ставка'}</div>
+              <div class="stat-sub">${emp.rate_type === 'percent' ? emp.rate_value + '% от суммы' : 'Фикс. ставка'}${data.items.some(i => i.full_rate) ? ' + работы на 100%' : ''}</div>
             </div>
           </div>
         </div>
@@ -152,9 +152,9 @@ async function renderEmployeeDetail(id) {
                     ${data.items.map(item => `
                       <tr>
                         <td><a href="#/orders/${item.order_id}" style="color:var(--accent)">№${item.order_id}</a></td>
-                        <td class="td-primary">${App.escHtml(item.work_name)}</td>
+                        <td class="td-primary">${App.escHtml(item.work_name)}${item.full_rate ? ' <span class="badge" style="background:rgba(72,187,120,0.15);color:#48bb78;font-size:10px">100%</span>' : ''}${item.discount ? ` <span class="text-muted text-sm">−${+item.discount}%</span>` : ''}</td>
                         <td>${App.statusBadge(item.status)}</td>
-                        <td class="font-bold">${App.formatMoney(item.price)}</td>
+                        <td class="font-bold">${App.formatMoney(item.amount)}</td>
                       </tr>
                     `).join('')}
                   </tbody>

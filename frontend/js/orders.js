@@ -243,6 +243,10 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
   const servicesTotal = order.services_total ?? order.items.reduce((s, i) => s + i.price, 0);
   const partsTotal = order.parts_total ?? (order.parts || []).reduce((s, p) => s + p.price * p.qty, 0);
   const totalAmount = order.total_amount ?? (servicesTotal + partsTotal);
+  const discountTotal = Math.round(
+    order.items.reduce((s, i) => s + i.price - i.amount, 0)
+    + (order.parts || []).reduce((s, p) => s + p.price * p.qty - p.amount, 0)
+  );
 
   App.setContent(`
     <div class="page-header">
@@ -398,6 +402,11 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
                   <span class="label">Итого</span>
                   <span class="value">${App.formatMoney(totalAmount)}</span>
                 </div>
+                ${discountTotal > 0 ? `
+                <div class="order-totals-row">
+                  <span class="label">в т.ч. скидка</span>
+                  <span class="value">${App.formatMoney(discountTotal)}</span>
+                </div>` : ''}
               </div>`}
             </div>
           </div>
@@ -522,6 +531,8 @@ function switchOrderTab(tab, orderId, brand, model) {
 function _setTabActions(tab, orderId, brand, model, vehicle) {
   const actionsEl = document.getElementById('tab-actions');
   if (!actionsEl) return;
+  // Скидки меняют деньги — механику с видимостью «только свои работы» недоступны
+  const canBulk = !Permissions.isOrderScoped();
 
   if (tab === 'works') {
     actionsEl.innerHTML = `
@@ -529,17 +540,67 @@ function _setTabActions(tab, orderId, brand, model, vehicle) {
       <button class="btn btn-sm btn-secondary" onclick="recalcOrderPrices(${orderId})" title="Пересчитать цены позиций из справочника под текущий автомобиль">
         ↻ Пересчитать цены
       </button>` : ''}
+      ${canBulk ? `<button class="btn btn-sm btn-secondary" onclick="showBulkDiscountModal(${orderId}, 'items')" title="Одна скидка на все работы">% Скидка на все</button>` : ''}
       <button class="btn btn-sm btn-primary" onclick="showItemModal(${orderId}, null, '${brand}', '${model}')">
         + Добавить работу
       </button>
     `;
   } else {
     actionsEl.innerHTML = `
+      ${canBulk ? `<button class="btn btn-sm btn-secondary" onclick="showBulkDiscountModal(${orderId}, 'parts')" title="Одна скидка на все запчасти">% Скидка на все</button>` : ''}
       <button class="btn btn-sm btn-primary" onclick="showPartModal(${orderId}, null)">
         + Добавить запчасть
       </button>
     `;
   }
+}
+
+// ─── Discounts ────────────────────────────────────────────────────────────────
+/** Сумма позиции; при скидке — зачёркнутая полная цена и процент под ней */
+function _amountHtml(amount, fullPrice, discount) {
+  if (!discount) return App.formatMoney(amount);
+  return `${App.formatMoney(amount)}
+    <div class="text-sm text-muted" style="font-weight:400;white-space:nowrap">
+      <s>${App.formatMoney(fullPrice)}</s> · −${+discount}%
+    </div>`;
+}
+
+function _fullRateBadge(item) {
+  return item.full_rate
+    ? ' <span class="badge" style="background:rgba(72,187,120,0.15);color:#48bb78;font-size:10px" title="Исполнитель получает 100% суммы работы">100%</span>'
+    : '';
+}
+
+function showBulkDiscountModal(orderId, target) {
+  const isItems = target === 'items';
+  App.openModal({
+    title: isItems ? 'Скидка на все работы' : 'Скидка на все запчасти',
+    body: `
+      <form id="bulk-discount-form" onsubmit="event.preventDefault()">
+        <div class="form-group">
+          <label>Скидка, %</label>
+          <input name="discount" id="bulk-discount-input" type="number" class="form-control" min="0" max="100" step="0.5" value="0" />
+          <small class="text-muted" style="font-size:11px">
+            Заменит скидку у всех ${isItems ? 'работ' : 'запчастей'} этого заказа. 0 — убрать скидку.
+          </small>
+        </div>
+      </form>
+    `,
+    submitLabel: 'Применить',
+    onSubmit: async () => {
+      const discount = parseFloat(document.getElementById('bulk-discount-input').value) || 0;
+      if (discount < 0 || discount > 100) return App.toast('Скидка должна быть от 0 до 100%', 'error');
+      try {
+        await App.api(`/orders/${orderId}/discount`, { method: 'POST', body: { target, discount } });
+        App.closeModal();
+        App.toast(discount ? `Скидка ${discount}% применена` : 'Скидка убрана');
+        await renderOrderDetail(orderId);
+        if (!isItems) setTimeout(() => switchOrderTab('parts', orderId, '', ''), 50);
+      } catch (err) {
+        App.toast(err.message, 'error');
+      }
+    },
+  });
 }
 
 // ─── Items Table ──────────────────────────────────────────────────────────────
@@ -556,10 +617,10 @@ function _renderItemsTable(items, orderId, empMap, brand, model) {
         <div class="order-item-card">
           <div class="order-item-card-header">
             <span class="order-item-card-title">${App.escHtml(item.work_name)}</span>
-            <span class="order-item-card-price">${App.formatMoney(item.price)}</span>
+            <span class="order-item-card-price">${_amountHtml(item.amount, item.price, item.discount)}</span>
           </div>
           <div class="order-item-card-meta">
-            <span>👤 ${item.employee ? App.escHtml(item.employee.full_name) : '<span class="text-muted">Исполнитель не назначен</span>'}</span>
+            <span>👤 ${item.employee ? App.escHtml(item.employee.full_name) : '<span class="text-muted">Исполнитель не назначен</span>'}${_fullRateBadge(item)}</span>
           </div>
           <div class="order-item-card-footer">
             <select class="form-control item-status-select"
@@ -584,7 +645,7 @@ function _renderItemsTable(items, orderId, empMap, brand, model) {
           <tr>
             <th>Наименование работы</th>
             <th>Исполнитель</th>
-            <th>Цена (₸)</th>
+            <th>Сумма (₸)</th>
             <th>Статус</th>
             <th></th>
           </tr>
@@ -593,8 +654,8 @@ function _renderItemsTable(items, orderId, empMap, brand, model) {
           ${items.map(item => `
             <tr>
               <td class="td-primary">${App.escHtml(item.work_name)}</td>
-              <td class="text-sm">${item.employee ? App.escHtml(item.employee.full_name) : '<span class="text-muted">—</span>'}</td>
-              <td class="font-bold">${App.formatMoney(item.price)}</td>
+              <td class="text-sm">${item.employee ? App.escHtml(item.employee.full_name) : '<span class="text-muted">—</span>'}${_fullRateBadge(item)}</td>
+              <td class="font-bold">${_amountHtml(item.amount, item.price, item.discount)}</td>
               <td>
                 <select class="form-control" style="width:auto;padding:4px 8px"
                   onchange="changeItemStatus(${orderId}, ${item.id}, this.value)">
@@ -627,12 +688,11 @@ function _renderPartsTable(parts, orderId) {
     <!-- Mobile Cards View -->
     <div class="mobile-only order-items-cards-list">
       ${parts.map(p => {
-        const sum = Math.round(p.price * p.qty);
         return `
         <div class="order-item-card">
           <div class="order-item-card-header">
             <span class="order-item-card-title">${App.escHtml(p.name)}</span>
-            <span class="order-item-card-price">${App.formatMoney(sum)}</span>
+            <span class="order-item-card-price">${_amountHtml(p.amount, p.price * p.qty, p.discount)}</span>
           </div>
           <div class="order-item-card-meta">
             <span>${p.article ? `<span class="badge" style="background:rgba(255,255,255,0.08);color:var(--text-secondary);font-size:11px;">Арт: ${App.escHtml(p.article)}</span>` : '<span class="text-muted">Без артикула</span>'}</span>
@@ -664,14 +724,13 @@ function _renderPartsTable(parts, orderId) {
         </thead>
         <tbody>
           ${parts.map(p => {
-    const sum = Math.round(p.price * p.qty);
     return `
             <tr>
               <td class="td-primary">${App.escHtml(p.name)}</td>
               <td class="text-sm text-muted">${p.article ? App.escHtml(p.article) : '—'}</td>
               <td style="text-align:center">${+p.qty}</td>
               <td>${App.formatMoney(p.price)}</td>
-              <td class="font-bold">${App.formatMoney(sum)}</td>
+              <td class="font-bold">${_amountHtml(p.amount, p.price * p.qty, p.discount)}</td>
               <td>
                 <div class="item-actions">
                   <button class="btn btn-sm btn-secondary" onclick="showPartModal(${orderId}, ${p.id})">Изм.</button>
@@ -687,7 +746,18 @@ function _renderPartsTable(parts, orderId) {
 }
 
 // ─── Part Modal ───────────────────────────────────────────────────────────────
+function _updatePartSumPreview() {
+  const form = document.getElementById('part-form');
+  if (!form) return;
+  const price = parseFloat(form.price.value) || 0;
+  const qty = parseFloat(form.qty.value) || 1;
+  const discount = form.discount ? (parseFloat(form.discount.value) || 0) : 0;
+  document.getElementById('part-sum-preview').textContent =
+    'Сумма: ' + App.formatMoney(price * qty * (1 - discount / 100));
+}
+
 async function showPartModal(orderId, partId = null) {
+  const scoped = Permissions.isOrderScoped();
   let part = null;
   if (partId) {
     try {
@@ -716,20 +786,27 @@ async function showPartModal(orderId, partId = null) {
           <div class="form-group">
             <label>Количество <span class="required">*</span></label>
             <input name="qty" type="number" class="form-control" required min="0.001" step="0.001"
-              value="${part ? part.qty : 1}"
+              value="${part ? part.qty : 1}" oninput="_updatePartSumPreview()"
               placeholder="1" />
           </div>
         </div>
-        <div class="form-group">
-          <label>Цена за единицу (₸) <span class="required">*</span></label>
-          <input name="price" type="number" class="form-control" required min="0" step="100"
-            value="${part ? part.price : ''}"
-            placeholder="0"
-            id="part-price-input"
-            oninput="document.getElementById('part-sum-preview').textContent = 'Сумма: ' + App.formatMoney((parseFloat(this.value)||0) * (parseFloat(document.querySelector('[name=qty]').value)||1))" />
-          <div id="part-sum-preview" class="text-sm text-muted" style="margin-top:4px">
-            ${part ? `Сумма: ${App.formatMoney(part.price * part.qty)}` : ''}
+        <div class="form-row">
+          <div class="form-group">
+            <label>Цена за единицу (₸) <span class="required">*</span></label>
+            <input name="price" type="number" class="form-control" required min="0" step="100"
+              value="${part ? part.price : ''}"
+              placeholder="0"
+              id="part-price-input" oninput="_updatePartSumPreview()" />
           </div>
+          ${scoped ? '' : `
+          <div class="form-group">
+            <label>Скидка, %</label>
+            <input name="discount" type="number" class="form-control" min="0" max="100" step="0.5"
+              value="${part ? +part.discount : 0}" oninput="_updatePartSumPreview()" />
+          </div>`}
+        </div>
+        <div id="part-sum-preview" class="text-sm text-muted" style="margin-top:-6px;margin-bottom:8px">
+          ${part ? `Сумма: ${App.formatMoney(part.amount)}` : ''}
         </div>
       </form>
     `,
@@ -738,6 +815,7 @@ async function showPartModal(orderId, partId = null) {
       const data = App.formData('part-form');
       data.price = parseFloat(data.price) || 0;
       data.qty = parseFloat(data.qty) || 1;
+      if ('discount' in data) data.discount = parseFloat(data.discount) || 0;
 
       try {
         if (partId) {
@@ -1256,6 +1334,15 @@ async function showItemModal(orderId, itemId = null, brand = '', model = '') {
               value="${item ? item.price : ''}"
               placeholder="0" />
           </div>
+          ${scoped ? '' : `
+          <div class="form-group">
+            <label>Скидка, %</label>
+            <input name="discount" type="number" class="form-control" min="0" max="100" step="0.5"
+              value="${item ? +item.discount : 0}" />
+          </div>`}
+        </div>
+
+        <div class="form-row">
           <div class="form-group">
             <label>Исполнитель</label>
             <select name="employee_id" class="form-control">
@@ -1267,6 +1354,13 @@ async function showItemModal(orderId, itemId = null, brand = '', model = '') {
               `).join('')}
             </select>
           </div>
+          ${scoped ? '' : `
+          <div class="form-group" style="display:flex;align-items:flex-end">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:10px" title="Исполнитель получит всю сумму работы, а не процент по своей ставке">
+              <input type="checkbox" name="full_rate" ${item?.full_rate ? 'checked' : ''} style="width:18px;height:18px" />
+              100% исполнителю
+            </label>
+          </div>`}
         </div>
 
         ${item ? `
@@ -1285,6 +1379,10 @@ async function showItemModal(orderId, itemId = null, brand = '', model = '') {
       const data = App.formData('item-form');
       data.price = parseFloat(data.price) || 0;
       if (!data.employee_id) data.employee_id = null;
+      if (!scoped) {
+        data.discount = parseFloat(data.discount) || 0;
+        data.full_rate = !!document.querySelector('#item-form [name=full_rate]')?.checked;
+      }
       data.service_id = data.service_id ? parseInt(data.service_id) : null;
 
       try {

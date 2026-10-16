@@ -88,8 +88,8 @@ def get_vehicle_history(
     total_spent = 0.0
 
     for order in orders:
-        services_total = round(sum(item.price for item in order.items), 2)
-        parts_total = round(sum(p.price * p.qty for p in order.parts), 2)
+        services_total = round(sum(item.amount for item in order.items), 2)
+        parts_total = round(sum(p.amount for p in order.parts), 2)
         total = round(services_total + parts_total, 2)
         total_spent += total
 
@@ -270,7 +270,7 @@ def export_vehicle_history(
 
     # ─── Summary stats ────────────────────────────────────────────────────────
     total_spent = sum(
-        round(sum(i.price for i in o.items) + sum(p.price * p.qty for p in o.parts), 2)
+        round(sum(i.amount for i in o.items) + sum(p.amount for p in o.parts), 2)
         for o in orders
     )
     add_styled_para("СТАТИСТИКА", size=8, bold=True, color=(0x88, 0x88, 0x99), space_after=4)
@@ -305,8 +305,8 @@ def export_vehicle_history(
         add_styled_para("Заказ-нарядов по этому автомобилю не найдено.", size=10, color=(0x88, 0x88, 0x99))
     else:
         for order in reversed(orders):  # newest first
-            services_total = round(sum(item.price for item in order.items), 2)
-            parts_total = round(sum(p.price * p.qty for p in order.parts), 2)
+            services_total = round(sum(item.amount for item in order.items), 2)
+            parts_total = round(sum(p.amount for p in order.parts), 2)
             total = round(services_total + parts_total, 2)
 
             # ── Order header ──
@@ -363,7 +363,7 @@ def export_vehicle_history(
                     row = works_table.add_row()
                     row.cells[0].text = item.work_name
                     row.cells[1].text = item.employee.full_name if item.employee else "—"
-                    row.cells[2].text = f"{item.price:,.0f}".replace(",", " ")
+                    row.cells[2].text = f"{item.amount:,.0f}".replace(",", " ")
                     for j, cell in enumerate(row.cells):
                         set_cell_padding(cell, top=50, bottom=50, left=100, right=60)
                         set_cell_borders(cell, "DDDDEE")
@@ -394,7 +394,7 @@ def export_vehicle_history(
                     row = parts_table.add_row()
                     row.cells[0].text = part.name
                     row.cells[1].text = str(part.qty).rstrip("0").rstrip(".")
-                    row.cells[2].text = f"{part.price * part.qty:,.0f}".replace(",", " ")
+                    row.cells[2].text = f"{part.amount:,.0f}".replace(",", " ")
                     for j, cell in enumerate(row.cells):
                         set_cell_padding(cell, top=50, bottom=50, left=100, right=60)
                         set_cell_borders(cell, "EEDDCC")

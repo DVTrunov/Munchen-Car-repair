@@ -63,18 +63,14 @@ def get_summary(
             for item in order.items
             if item.employee_id == emp.id
         ]
-        emp_total = sum(item.price for item in emp_items)
+        emp_total = round(sum(item.amount for item in emp_items), 2)
         employee_stats.append({
             "id": emp.id,
             "full_name": emp.full_name,
             "role": emp.role.value if hasattr(emp.role, "value") else str(emp.role),
             "items_count": len(emp_items),
             "total_amount": emp_total,
-            "estimated_salary": (
-                emp_total * emp.rate_value / 100
-                if emp.rate_type == models.RateType.percent
-                else emp.rate_value
-            ),
+            "estimated_salary": emp.salary_for(emp_items),
         })
     employee_stats.sort(key=lambda x: x["total_amount"], reverse=True)
 
