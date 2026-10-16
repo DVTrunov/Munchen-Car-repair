@@ -10,6 +10,7 @@ from database import get_db
 from auth import get_current_user, get_owner_user
 import models
 import schemas
+from pricing import price_options, resolve_price
 
 router = APIRouter()
 
@@ -117,6 +118,9 @@ def set_service_price(
 
     brand_val = data.brand.strip() if data.brand and data.brand.strip() else None
     model_val = data.model.strip() if data.model and data.model.strip() else None
+    variant_val = data.variant.strip() if data.variant and data.variant.strip() else None
+    if variant_val and not brand_val:
+        raise HTTPException(status_code=422, detail="Особенность указывается вместе с маркой авто")
 
     # Price validation: price for brand / brand+model cannot be <= 0
     if (brand_val or model_val) and data.price <= 0:
@@ -131,6 +135,7 @@ def set_service_price(
         models.ServicePrice.service_id == service_id,
         models.ServicePrice.brand == brand_val,
         models.ServicePrice.model == model_val,
+        models.ServicePrice.variant == variant_val,
     ).first()
 
     if existing:
@@ -143,6 +148,7 @@ def set_service_price(
             service_id=service_id,
             brand=brand_val,
             model=model_val,
+            variant=variant_val,
             price=data.price,
         )
         db.add(new_price)
@@ -169,39 +175,22 @@ def resolve_service_price(
     service_id: int,
     brand: Optional[str] = Query(None),
     model: Optional[str] = Query(None),
+    variant: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(get_current_user),
 ):
     """
-    Resolve effective price for a service given vehicle brand and model.
-    Priority:
-    1. Exact match (brand + model)
-    2. Brand match (brand only)
-    3. General price (default)
+    Цена услуги для авто (см. pricing.resolve_price) и список всех подходящих
+    вариантов цены — чтобы в заказе можно было выбрать особенность (кузов, привод).
     """
     prices = db.query(models.ServicePrice).filter(models.ServicePrice.service_id == service_id).all()
-    if not prices:
-        return {"price": 0.0, "match_type": "none"}
-
-    b_norm = brand.strip().lower() if brand else None
-    m_norm = model.strip().lower() if model else None
-
-    # 1. Exact match
-    if b_norm and m_norm:
-        for p in prices:
-            if p.brand and p.model and p.brand.strip().lower() == b_norm and p.model.strip().lower() == m_norm:
-                return {"price": p.price, "match_type": "brand_model"}
-
-    # 2. Brand match
-    if b_norm:
-        for p in prices:
-            if p.brand and not p.model and p.brand.strip().lower() == b_norm:
-                return {"price": p.price, "match_type": "brand"}
-
-    # 3. General match
-    for p in prices:
-        if not p.brand and not p.model:
-            return {"price": p.price, "match_type": "general"}
-
-    # Fallback to first available price if any
-    return {"price": prices[0].price, "match_type": "fallback"}
+    rule, match_type = resolve_price(prices, brand, model, variant)
+    return {
+        "price": rule.price if rule else 0.0,
+        "match_type": match_type,
+        "variant": rule.variant if rule else None,
+        "options": [
+            {"id": p.id, "brand": p.brand, "model": p.model, "variant": p.variant, "price": p.price}
+            for p in price_options(prices, brand, model)
+        ],
+    }

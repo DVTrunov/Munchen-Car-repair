@@ -93,12 +93,12 @@ async function loadServices(search = '') {
                   </td>
                   <td>
                     ${customPrices.length > 0 ? `
-                      <div class="flex flex-col gap-1">
+                      <div class="flex flex-col gap-1" style="min-width:260px">
                         ${customPrices.map(cp => `
-                          <div class="text-sm" style="background:var(--bg-input);padding:3px 8px;border-radius:var(--radius-sm);display:inline-flex;align-items:center;justify-content:space-between;gap:8px">
+                          <div class="text-sm" style="background:var(--bg-input);padding:3px 8px;border-radius:var(--radius-sm);display:inline-flex;align-items:center;justify-content:space-between;gap:8px;white-space:nowrap">
                             <span>
                               <strong>${App.escHtml(cp.brand || 'Все')}</strong>
-                              ${cp.model ? ` ${App.escHtml(cp.model)}` : ' (все модели)'}:
+                              ${cp.model ? ` ${App.escHtml(cp.model)}` : ' (все модели)'}${cp.variant ? ` · <span style="color:var(--accent)">${App.escHtml(cp.variant)}</span>` : ''}:
                             </span>
                             <span class="font-bold text-success">${App.formatMoney(cp.price)}</span>
                             <button style="background:none;border:none;color:var(--clr-danger);cursor:pointer;" onclick="deletePriceRule(${cp.id})" title="Удалить цену">✕</button>
@@ -219,6 +219,15 @@ async function showPriceModal(serviceId, serviceName) {
           </div>
         </div>
         <div class="form-group">
+          <label>Особенность (необязательно)</label>
+          <input name="variant" id="price-variant-input" class="form-control" maxlength="100" disabled
+            placeholder="Сначала выберите марку" />
+          <div class="text-muted text-sm mt-1">
+            Кузов, привод и т.п. — например «F10 xDrive». Цена с особенностью — отдельная цена:
+            её можно выбрать при добавлении работы в заказ.
+          </div>
+        </div>
+        <div class="form-group">
           <label>Цена (₸) <span class="required">*</span></label>
           <input name="price" type="number" class="form-control" required min="1" step="100" placeholder="7000" />
           <div class="text-muted text-sm mt-1">Цена должна быть больше 0</div>
@@ -235,6 +244,7 @@ async function showPriceModal(serviceId, serviceName) {
       const brandName = bSelect.selectedIndex > 0 ? bSelect.options[bSelect.selectedIndex].getAttribute('data-name') : null;
       const modelName = (brandName && mSelect.selectedIndex > 0) ? mSelect.options[mSelect.selectedIndex].value : null;
       const priceVal = parseFloat(priceInput.value) || 0;
+      const variant = brandName ? document.getElementById('price-variant-input').value.trim() || null : null;
 
       if (priceVal <= 0) {
         App.toast('Цена должна быть больше 0!', 'error');
@@ -244,7 +254,7 @@ async function showPriceModal(serviceId, serviceName) {
       try {
         await App.api(`/services/${serviceId}/prices`, {
           method: 'POST',
-          body: { brand: brandName, model: modelName, price: priceVal },
+          body: { brand: brandName, model: modelName, variant, price: priceVal },
         });
         App.toast(brandName ? 'Спец. цена сохранена!' : 'Общая цена сохранена!');
         App.closeModal();
@@ -259,6 +269,11 @@ async function showPriceModal(serviceId, serviceName) {
 /** Dynamic models dropdown loader for pricing modal */
 async function onPriceBrandChanged(brandId) {
   const mSelect = document.getElementById('price-model-select');
+  // Особенность имеет смысл только вместе с маркой
+  const variantInput = document.getElementById('price-variant-input');
+  variantInput.disabled = !brandId;
+  variantInput.placeholder = brandId ? 'например, F10 xDrive' : 'Сначала выберите марку';
+  if (!brandId) variantInput.value = '';
   if (!brandId) {
     mSelect.innerHTML = '<option value="">— Сначала выберите марку —</option>';
     mSelect.disabled = true;

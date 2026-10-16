@@ -22,6 +22,7 @@ import models
 import schemas
 from notifications import send_notification
 from upload_utils import save_image
+from pricing import resolve_price
 
 router = APIRouter()
 
@@ -36,33 +37,14 @@ def _recalc_total(order: models.Order) -> None:
     order.total_amount = round(services_total + parts_total, 2)
 
 
-def _resolve_catalog_price(db: Session, service_id: int, brand: Optional[str], model: Optional[str]) -> Optional[float]:
-    """
-    Резолв цены услуги по приоритету (та же логика, что в services.resolve_service_price):
-    1. Точное совпадение марка+модель
-    2. Совпадение по марке
-    3. Общая цена (без привязки к марке/модели)
-    Возвращает None, если для услуги вообще не задано ни одной цены.
-    """
+def _resolve_catalog_price(
+    db: Session, service_id: int, brand: Optional[str], model: Optional[str], variant: Optional[str] = None
+) -> Optional[float]:
+    """Цена услуги под авто (та же логика, что в справочнике — см. pricing.resolve_price).
+    None — если под это авто нет подходящего правила (позицию тогда не трогаем)."""
     prices = db.query(models.ServicePrice).filter(models.ServicePrice.service_id == service_id).all()
-    if not prices:
-        return None
-
-    b_norm = brand.strip().lower() if brand else None
-    m_norm = model.strip().lower() if model else None
-
-    if b_norm and m_norm:
-        for p in prices:
-            if p.brand and p.model and p.brand.strip().lower() == b_norm and p.model.strip().lower() == m_norm:
-                return p.price
-    if b_norm:
-        for p in prices:
-            if p.brand and not p.model and p.brand.strip().lower() == b_norm:
-                return p.price
-    for p in prices:
-        if not p.brand and not p.model:
-            return p.price
-    return None
+    rule, match_type = resolve_price(prices, brand, model, variant)
+    return rule.price if rule and match_type != "fallback" else None
 
 
 def _order_to_out(order: models.Order, access: OrderAccess) -> schemas.OrderOut:
@@ -530,7 +512,7 @@ def recalculate_order_prices(
     for item in access.visible_items(order):
         if not item.service_id:
             continue
-        new_price = _resolve_catalog_price(db, item.service_id, order.vehicle.brand, order.vehicle.model)
+        new_price = _resolve_catalog_price(db, item.service_id, order.vehicle.brand, order.vehicle.model, item.price_variant)
         if new_price is not None and new_price != item.price:
             item.price = new_price
             updated_count += 1

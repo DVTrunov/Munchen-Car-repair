@@ -166,6 +166,7 @@ class OrderItem(Base):
     employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
     service_id = Column(Integer, ForeignKey("services.id"), nullable=True)  # если позиция создана из справочника — можно пересчитать цену
     price = Column(Float, nullable=False, default=0.0)
+    price_variant = Column(String(100), nullable=True)  # особенность цены из справочника (для пересчёта)
     discount = Column(Float, nullable=False, default=0.0)  # скидка в процентах
     full_rate = Column(Boolean, nullable=False, default=False)  # исполнитель получает 100% суммы работы
     status = Column(SAEnum(OrderItemStatus), default=OrderItemStatus.pending, nullable=False)
@@ -224,6 +225,7 @@ class ServicePrice(Base):
     service_id = Column(Integer, ForeignKey("services.id"), nullable=False)
     brand = Column(String(50), nullable=True)   # Null means all brands
     model = Column(String(50), nullable=True)   # Null means all models for this brand
+    variant = Column(String(100), nullable=True)  # особенность: кузов, привод и т.п. («F10 xDrive»)
     price = Column(Float, nullable=False, default=0.0)
 
     service = relationship("Service", back_populates="prices")

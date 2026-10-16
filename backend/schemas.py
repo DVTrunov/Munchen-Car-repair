@@ -192,6 +192,7 @@ class OrderItemBase(BaseModel):
     work_name: str
     employee_id: Optional[int] = None
     service_id: Optional[int] = None  # если позиция создана из справочника — можно пересчитать цену при смене авто
+    price_variant: Optional[str] = None  # особенность цены из справочника
     price: float = 0.0
     discount: float = Discount
     full_rate: bool = False  # исполнитель получает 100% суммы работы
@@ -206,6 +207,7 @@ class OrderItemUpdate(BaseModel):
     work_name: Optional[str] = None
     employee_id: Optional[int] = None
     service_id: Optional[int] = None
+    price_variant: Optional[str] = None
     price: Optional[float] = None
     discount: Optional[float] = OptionalDiscount
     full_rate: Optional[bool] = None
@@ -269,6 +271,7 @@ class ServiceCategoryShort(BaseModel):
 class ServicePriceBase(BaseModel):
     brand: Optional[str] = None
     model: Optional[str] = None
+    variant: Optional[str] = None  # особенность: кузов, привод и т.п.
     price: float = 0.0
 
 
