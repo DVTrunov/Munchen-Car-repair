@@ -7,6 +7,7 @@
 const App = {
   token: null,
   user: null,   // { username, role }
+  company: { name: 'Автосервис', logo_url: null },  // название и логотип из настроек
 
   // ─── Initialization ───────────────────────────────────────────────────────
   async init() {
@@ -30,6 +31,7 @@ const App = {
     if (sidebarClose) sidebarClose.addEventListener('click', () => this.closeMobileSidebar());
     if (backdrop) backdrop.addEventListener('click', () => this.closeMobileSidebar());
 
+    await this.loadCompany();
     if (this.token) await this._loadSession();
     this._route();
   },
@@ -170,13 +172,12 @@ const App = {
       else return renderOrders();
     }
 
-    if (path === '/roles') {
-      if (this.isOwner()) return renderRoles();
-      else return renderOrders();
-    }
+    // Старые адреса разделов, которые теперь живут в «Настройках»
+    if (path === '/roles') return this.navigate('/settings/roles');
+    if (path === '/users') return this.navigate('/settings/users');
 
-    if (path === '/users') {
-      if (this.isOwner()) return renderUsers();
+    if (path === '/settings' || path.startsWith('/settings/')) {
+      if (this.isOwner()) return renderSettings(path.split('/')[2] || 'general');
       else return renderOrders();
     }
 
@@ -205,6 +206,40 @@ const App = {
     await this._loadSession();
     if (window.location.hash === '#/orders') this._route();
     else this.navigate('/orders');
+  },
+
+  // ─── Branding (название и логотип автосервиса) ────────────────────────────
+  async loadCompany() {
+    try {
+      const res = await fetch('/api/settings/company');
+      if (res.ok) this.company = await res.json();
+    } catch {}
+    this.applyBranding();
+  },
+
+  /** HTML логотипа высотой size: загруженная картинка (ширина по пропорциям) или стандартная иконка */
+  logoHtml(size) {
+    if (this.company.logo_url) {
+      return `<img src="${this.escHtml(this.company.logo_url)}" alt="" style="height:${size}px;width:auto;max-width:${size * 4}px" />`;
+    }
+    return `<svg width="${size}" height="${size}" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="28" height="28" rx="8" fill="#f59e0b" />
+      <path d="M7 18l3-8h8l3 8" stroke="#0f1117" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      <circle cx="10" cy="19.5" r="1.5" fill="#0f1117" />
+      <circle cx="18" cy="19.5" r="1.5" fill="#0f1117" />
+      <path d="M5 14h18" stroke="#0f1117" stroke-width="1.5" stroke-linecap="round" />
+    </svg>`;
+  },
+
+  applyBranding() {
+    const name = this.company.name;
+    document.title = `${name} — CRM`;
+    document.querySelectorAll('[data-brand-name]').forEach(el => { el.textContent = name; });
+    document.querySelectorAll('[data-brand-logo]').forEach(el => {
+      el.innerHTML = this.logoHtml(parseInt(el.dataset.size) || 28);
+    });
+    const favicon = document.getElementById('favicon');
+    if (favicon) favicon.href = this.company.logo_url || '/favicon.ico';
   },
 
   /** Права ролей и привязка к сотруднику — нужны до отрисовки страниц */
@@ -250,8 +285,6 @@ const App = {
       'nav-employees':       'nav.employees',
       'nav-services':        'nav.services',
       'nav-analytics':       'nav.analytics',
-      'nav-roles':           'nav.roles',
-      'nav-users':           'nav.users',
     };
     for (const [elId, feat] of Object.entries(navMap)) {
       const el = document.getElementById(elId);
@@ -259,6 +292,7 @@ const App = {
       const allowed = Permissions.can(role, feat);
       el.classList.toggle('hidden', !allowed);
     }
+    document.getElementById('nav-settings')?.classList.toggle('hidden', !this.isOwner());
     // Отчёт по выработке есть только у пользователя, привязанного к сотруднику
     const myReport = document.getElementById('nav-my-report');
     if (myReport) {
@@ -287,6 +321,10 @@ const App = {
 
   // ─── Content Rendering ────────────────────────────────────────────────────
   setContent(html) {
+    // Внутри «Настроек» над содержимым всегда показываются вкладки подразделов
+    if (window.location.hash.startsWith('#/settings') && typeof settingsTabsHtml === 'function') {
+      html = settingsTabsHtml() + html;
+    }
     document.getElementById('main-content').innerHTML = html;
   },
 

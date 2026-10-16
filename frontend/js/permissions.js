@@ -97,17 +97,13 @@ const Permissions = (() => {
         { key: 'nav.employees', label: 'Сотрудники' },
         { key: 'nav.services',  label: 'Услуги и Прайс' },
         { key: 'nav.analytics', label: 'Аналитика' },
-        { key: 'nav.roles',     label: 'Управление ролями' },
-        { key: 'nav.users',     label: 'Пользователи' },
         { key: 'nav.my_report', label: 'Моя выработка (отчёт сотрудника)' },
       ]
     },
     {
       group: 'Печать заказ-наряда',
       features: [
-        { key: 'print.placeholders', label: 'Вкладка «Плейсхолдеры» (справка по шаблону)' },
-        { key: 'print.upload',       label: 'Вкладка «Загрузить шаблон»' },
-        { key: 'print.generate',     label: 'Вкладка «Сформировать и скачать DOCX»' },
+        { key: 'print.generate',     label: 'Кнопка «Печать» (скачать DOCX по шаблону)' },
       ]
     },
     {

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from access import OrderAccess, get_order_access
+from routers.settings import get_company_name
 import models
 
 router = APIRouter()
@@ -219,7 +220,9 @@ def export_vehicle_history(
     subtitle_p = doc.add_paragraph()
     subtitle_p.paragraph_format.space_before = Pt(0)
     subtitle_p.paragraph_format.space_after = Pt(14)
-    sub_run = subtitle_p.add_run("Отчёт сформирован: " + datetime.now().strftime("%d.%m.%Y %H:%M"))
+    sub_run = subtitle_p.add_run(
+        f"{get_company_name(db)} · Отчёт сформирован: " + datetime.now().strftime("%d.%m.%Y %H:%M")
+    )
     sub_run.font.name = "Calibri"
     sub_run.font.size = Pt(9)
     sub_run.font.color.rgb = RGBColor(0x88, 0x88, 0x99)

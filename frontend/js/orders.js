@@ -978,155 +978,23 @@ function closeCommentsDrawer() {
 
 // ─── Print Modal ──────────────────────────────────────────────────────────────
 async function openPrintModal(orderId) {
-  let placeholders = [];
-  let templateExists = false;
-  const role = App.user?.role;
-  const canPlaceholders = Permissions.can(role, 'print.placeholders');
-  const canUpload       = Permissions.can(role, 'print.upload');
-  const canGenerate     = Permissions.can(role, 'print.generate');
-
-  // If only generate is allowed — skip the modal entirely and just download
-  if (!canPlaceholders && !canUpload && canGenerate) {
-    try {
-      const { exists } = await App.api('/print-templates/template-exists');
-      if (!exists) {
+  if (!Permissions.can(App.user?.role, 'print.generate')) {
+    App.toast('Печать недоступна для вашей роли', 'error');
+    return;
+  }
+  try {
+    const { exists } = await App.api('/print-templates/template-exists');
+    if (!exists) {
+      // Шаблон загружается в «Настройки → Печатная форма»
+      if (App.isOwner() && await App.confirm('Шаблон печатной формы не загружен. Перейти в настройки, чтобы загрузить его?')) {
+        App.navigate('/settings/print');
+      } else if (!App.isOwner()) {
         App.toast('Шаблон не загружен. Обратитесь к администратору.', 'error');
-        return;
       }
-    } catch {}
-    generateOrderDoc(orderId);
-    return;
-  }
-
-  try {
-    [placeholders, { exists: templateExists }] = await Promise.all([
-      App.api('/print-templates/placeholders'),
-      App.api('/print-templates/template-exists'),
-    ]);
-  } catch {}
-
-  // Determine which tabs are visible
-  const tabs = [];
-  if (canPlaceholders) tabs.push({ id: 'help',   label: '📋 Плейсхолдеры' });
-  if (canUpload)       tabs.push({ id: 'upload', label: '⬆ Загрузить шаблон' });
-  if (canGenerate)     tabs.push({ id: 'gen',    label: '📄 Сформировать' });
-
-  const firstTab = tabs[0]?.id || 'gen';
-
-  App.openModal({
-    title: '🖨 Конструктор печатной формы',
-    wide: true,
-    body: `
-      <div style="font-size:13px">
-
-        ${tabs.length > 1 ? `
-        <div class="card-tabs" style="margin:-16px -20px 16px;padding:0 20px">
-          ${tabs.map(t => `<div class="card-tab ${t.id === firstTab ? 'active' : ''}" id="print-tab-${t.id}" onclick="switchPrintTab('${t.id}')">${t.label}</div>`).join('')}
-        </div>` : ''}
-
-        <!-- Placeholders list -->
-        ${canPlaceholders ? `
-        <div id="print-pane-help" class="tab-pane ${firstTab === 'help' ? 'active' : ''}">
-          <p class="text-muted text-sm mb-4">
-            Создайте DOCX-шаблон в Word, вставьте нужные плейсхолдеры из списка ниже,
-            затем загрузите шаблон на вкладке «Загрузить шаблон».
-          </p>
-          <table class="print-placeholders-table">
-            <thead><tr><th>Плейсхолдер</th><th>Описание</th></tr></thead>
-            <tbody>
-              ${placeholders.map(p => `
-                <tr>
-                  <td>${App.escHtml(p.key)}</td>
-                  <td style="color:var(--text-secondary)">${App.escHtml(p.description)}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>` : ''}
-
-        <!-- Upload template -->
-        ${canUpload ? `
-        <div id="print-pane-upload" class="tab-pane ${firstTab === 'upload' ? 'active' : ''}">
-          <div class="template-status ${templateExists ? 'ok' : 'missing'}">
-            ${templateExists ? '✅ Шаблон загружен и готов к использованию' : '⚠️ Шаблон ещё не загружен'}
-          </div>
-          <div class="form-group">
-            <label>Выберите DOCX-файл шаблона</label>
-            <input type="file" id="print-template-file" accept=".docx" class="form-control" />
-          </div>
-          <button class="btn btn-primary" id="btn-upload-template" onclick="uploadPrintTemplate()">
-            ⬆ Загрузить шаблон
-          </button>
-          <p class="text-muted text-sm" style="margin-top:10px">
-            Файл заменит текущий шаблон. Используйте расширение .docx (Microsoft Word).
-          </p>
-        </div>` : ''}
-
-        <!-- Generate -->
-        ${canGenerate ? `
-        <div id="print-pane-gen" class="tab-pane ${firstTab === 'gen' ? 'active' : ''}">
-          <div class="template-status ${templateExists ? 'ok' : 'missing'}">
-            ${templateExists ? '✅ Шаблон загружен — можно формировать документ' : '⚠️ Шаблон не загружен. Обратитесь к администратору.'}
-          </div>
-          ${templateExists ? `
-            <p class="text-muted text-sm mb-4">
-              Нажмите кнопку ниже — сервер подставит данные заказа #${orderId} в шаблон и скачает готовый DOCX.
-            </p>
-            <button class="btn btn-primary btn-lg" onclick="generateOrderDoc(${orderId})">
-              📄 Сформировать и скачать DOCX
-            </button>
-          ` : `
-            <p class="text-muted text-sm">Сначала загрузите шаблон.</p>
-          `}
-        </div>` : ''}
-
-      </div>
-    `,
-    noFooter: true,
-  });
-}
-
-
-function switchPrintTab(tab) {
-  document.querySelectorAll('#print-pane-help,#print-pane-upload,#print-pane-gen').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('#print-tab-help,#print-tab-upload,#print-tab-gen').forEach(t => t.classList.remove('active'));
-  document.getElementById(`print-pane-${tab}`).classList.add('active');
-  document.getElementById(`print-tab-${tab}`).classList.add('active');
-}
-
-async function uploadPrintTemplate() {
-  const fileInput = document.getElementById('print-template-file');
-  if (!fileInput || !fileInput.files[0]) {
-    App.toast('Выберите файл', 'error');
-    return;
-  }
-
-  const btn = document.getElementById('btn-upload-template');
-  if (btn) btn.disabled = true;
-
-  try {
-    const token = App.token || localStorage.getItem('sto_token');
-    const formData = new FormData();
-    formData.append('file', fileInput.files[0]);
-
-    const resp = await fetch('/api/print-templates/upload', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    });
-
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-      throw new Error(err.detail || 'Ошибка загрузки');
+      return;
     }
-
-    App.toast('Шаблон успешно загружен!');
-    App.closeModal();
-  } catch (err) {
-    App.toast(err.message, 'error');
-  } finally {
-    if (btn) btn.disabled = false;
-  }
+  } catch {}
+  generateOrderDoc(orderId);
 }
 
 async function generateOrderDoc(orderId) {
@@ -1154,7 +1022,6 @@ async function generateOrderDoc(orderId) {
     URL.revokeObjectURL(url);
 
     App.toast('Документ сформирован и скачан!');
-    App.closeModal();
   } catch (err) {
     App.toast(err.message, 'error');
   }
@@ -1679,8 +1546,8 @@ async function triggerNativeShare(url) {
   if (navigator.share) {
     try {
       await navigator.share({
-        title: 'Заказ-наряд СТО München',
-        text: 'Ссылка на просмотр заказ-наряда в автосервисе München:',
+        title: `Заказ-наряд — ${App.company.name}`,
+        text: `Ссылка на просмотр заказ-наряда в автосервисе «${App.company.name}»:`,
         url: url
       });
     } catch (err) {

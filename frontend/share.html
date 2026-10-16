@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Заказ-наряд — Munchen Autoservice</title>
-    <meta name="description" content="Просмотр статуса вашего заказ-наряда в автосервисе Munchen">
+    <title>Заказ-наряд</title>
+    <meta name="description" content="Просмотр статуса вашего заказ-наряда в автосервисе">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -51,6 +51,17 @@
             top: 0;
             z-index: 100;
             backdrop-filter: blur(12px);
+        }
+        .logo-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .company-logo {
+            width: 32px;
+            height: 32px;
+            object-fit: contain;
+            border-radius: 8px;
         }
         .logo {
             font-size: 20px;
@@ -506,7 +517,7 @@
 <body>
 
 <header class="header">
-    <div class="logo">🔧 Munchen</div>
+    <div class="logo-row"><img id="company-logo" class="company-logo" alt="" hidden /><div class="logo" id="company-name">🔧 Автосервис</div></div>
     <div class="header-sub">Автосервис — Просмотр заказ-наряда</div>
 </header>
 
@@ -818,7 +829,25 @@ async function submitComment() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
+let companyName = 'Автосервис';
+
+async function loadCompany() {
+    try {
+        const res = await fetch(`${BASE_URL}/api/settings/company`);
+        if (!res.ok) return;
+        const company = await res.json();
+        companyName = company.name;
+        document.getElementById('company-name').textContent = company.name;
+        if (company.logo_url) {
+            const logo = document.getElementById('company-logo');
+            logo.src = company.logo_url;
+            logo.hidden = false;
+        }
+    } catch (e) {}
+}
+
 async function init() {
+    await loadCompany();
     const token = getToken();
     if (!token) {
         showError('Неверная ссылка. Пожалуйста, попросите мастера выслать вам корректную ссылку.');
@@ -831,7 +860,7 @@ async function init() {
         if (!res.ok) throw new Error('Не удалось загрузить данные. Попробуйте позже.');
         const order = await res.json();
 
-        document.title = `Заказ-наряд №${order.id} — Munchen Autoservice`;
+        document.title = `Заказ-наряд №${order.id} — ${companyName}`;
         document.getElementById('loading').style.display = 'none';
         const content = document.getElementById('content');
         content.style.display = 'block';

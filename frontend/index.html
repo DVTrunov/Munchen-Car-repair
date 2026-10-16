@@ -4,11 +4,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <title>СТО München — CRM</title>
-  <meta name="description" content="CRM-система для управления автосервисом München" />
+  <title>CRM автосервиса</title>
+  <meta name="description" content="CRM-система для управления автосервисом" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="icon" id="favicon" href="/favicon.ico" />
   <link rel="stylesheet" href="/static/css/style.css" />
 </head>
 
@@ -25,6 +26,7 @@
         </svg>
       </button>
       <div class="mobile-brand">
+        <span class="brand-logo" data-brand-logo data-size="22">
         <svg width="22" height="22" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
           <rect width="28" height="28" rx="8" fill="#f59e0b" />
           <path d="M7 18l3-8h8l3 8" stroke="#0f1117" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
@@ -32,7 +34,8 @@
           <circle cx="18" cy="19.5" r="1.5" fill="#0f1117" />
           <path d="M5 14h18" stroke="#0f1117" stroke-width="1.5" stroke-linecap="round" />
         </svg>
-        <span class="mobile-brand-name">München СТО</span>
+        </span>
+        <span class="mobile-brand-name" data-brand-name>Автосервис</span>
       </div>
       <div class="mobile-user-avatar" id="mobile-user-avatar">?</div>
     </header>
@@ -44,6 +47,7 @@
     <aside id="sidebar" class="sidebar hidden">
       <div class="sidebar-header">
         <div class="sidebar-logo">
+          <span class="brand-logo" data-brand-logo data-size="28">
           <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
             <rect width="28" height="28" rx="8" fill="#f59e0b" />
             <path d="M7 18l3-8h8l3 8" stroke="#0f1117" stroke-width="2" stroke-linecap="round"
@@ -52,8 +56,9 @@
             <circle cx="18" cy="19.5" r="1.5" fill="#0f1117" />
             <path d="M5 14h18" stroke="#0f1117" stroke-width="1.5" stroke-linecap="round" />
           </svg>
+          </span>
           <div>
-            <div class="sidebar-brand">München СТО</div>
+            <div class="sidebar-brand" data-brand-name>Автосервис</div>
             <div class="sidebar-tagline">CRM система</div>
           </div>
         </div>
@@ -113,20 +118,11 @@
           <span>Аналитика</span>
           <span class="nav-badge">Владелец</span>
         </a>
-
-        <a href="#/roles" class="nav-item nav-item--owner hidden" id="nav-roles" data-route="/roles">
+        <a href="#/settings" class="nav-item nav-item--owner hidden" id="nav-settings" data-route="/settings">
           <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M10 1a4.5 4.5 0 00-4.5 4.5V9H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-.5V5.5A4.5 4.5 0 0010 1zm3 8V5.5a3 3 0 10-6 0V9h6z" clip-rule="evenodd" />
+            <path d="M5 4a1 1 0 00-2 0v7.268a2 2 0 000 3.464V16a1 1 0 102 0v-1.268a2 2 0 000-3.464V4zM11 4a1 1 0 10-2 0v1.268a2 2 0 000 3.464V16a1 1 0 102 0V8.732a2 2 0 000-3.464V4zM16 3a1 1 0 011 1v7.268a2 2 0 010 3.464V16a1 1 0 11-2 0v-1.268a2 2 0 010-3.464V4a1 1 0 011-1z" />
           </svg>
-          <span>Роли и права</span>
-          <span class="nav-badge">Владелец</span>
-        </a>
-
-        <a href="#/users" class="nav-item nav-item--owner hidden" id="nav-users" data-route="/users">
-          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-6-3a2 2 0 11-4 0 2 2 0 014 0zm-2 4a5 5 0 00-4.546 2.916A5.986 5.986 0 0010 16a5.986 5.986 0 004.546-2.084A5 5 0 0010 11z" clip-rule="evenodd" />
-          </svg>
-          <span>Пользователи</span>
+          <span>Настройки</span>
           <span class="nav-badge">Владелец</span>
         </a>
       </nav>
@@ -197,6 +193,7 @@
   <script src="/static/js/roles.js"></script>
   <script src="/static/js/vehicle-history.js"></script>
   <script src="/static/js/my-report.js"></script>
+  <script src="/static/js/settings.js"></script>
 
   <script>
     // Boot the app after all scripts loaded

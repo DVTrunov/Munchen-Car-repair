@@ -25,7 +25,7 @@ load_dotenv()
 from database import engine, SessionLocal
 import models
 from auth import get_password_hash
-from routers import auth, users, clients, vehicles, orders, employees, analytics, services, service_categories, print_templates, shared, vehicle_history, roles
+from routers import auth, users, clients, vehicles, orders, employees, analytics, services, service_categories, print_templates, shared, vehicle_history, roles, settings
 
 logging.basicConfig(
     level=logging.INFO,
@@ -207,6 +207,7 @@ app.include_router(print_templates.router, prefix="/api/print-templates", tags=[
 app.include_router(shared.router,          prefix="/api/shared",          tags=["shared"])
 app.include_router(vehicle_history.router, prefix="/api/vehicle-history",  tags=["vehicle-history"])
 app.include_router(roles.router,           prefix="/api/roles",           tags=["roles"])
+app.include_router(settings.router,        prefix="/api/settings",        tags=["settings"])
 
 
 # ─── Static uploads (user uploaded images) ────────────────────────────────────
