@@ -616,7 +616,7 @@ function _renderItemsTable(items, orderId, empMap, brand, model) {
       ${items.map(item => `
         <div class="order-item-card">
           <div class="order-item-card-header">
-            <span class="order-item-card-title">${App.escHtml(item.work_name)}</span>
+            <span class="order-item-card-title">${App.escHtml(item.work_name)}${item.price_variant ? ` <span class="text-sm text-muted" style="font-weight:400">· ${App.escHtml(item.price_variant)}</span>` : ''}</span>
             <span class="order-item-card-price">${_amountHtml(item.amount, item.price, item.discount)}</span>
           </div>
           <div class="order-item-card-meta">
@@ -653,7 +653,7 @@ function _renderItemsTable(items, orderId, empMap, brand, model) {
         <tbody>
           ${items.map(item => `
             <tr>
-              <td class="td-primary">${App.escHtml(item.work_name)}</td>
+              <td class="td-primary">${App.escHtml(item.work_name)}${item.price_variant ? `<div class="text-sm text-muted" style="font-weight:400">${App.escHtml(item.price_variant)}</div>` : ''}</td>
               <td class="text-sm">${item.employee ? App.escHtml(item.employee.full_name) : '<span class="text-muted">—</span>'}${_fullRateBadge(item)}</td>
               <td class="font-bold">${_amountHtml(item.amount, item.price, item.discount)}</td>
               <td>
@@ -1304,6 +1304,7 @@ async function showItemModal(orderId, itemId = null, brand = '', model = '') {
     body: `
       <form id="item-form">
         <input type="hidden" name="service_id" id="item-service-id" value="${item?.service_id || ''}" />
+        <input type="hidden" name="price_variant" id="item-price-variant" value="${App.escHtml(item?.price_variant || '')}" />
         <div class="form-group mb-4">
           <label>Выбрать из Справочника услуг</label>
           <div class="flex gap-2">
@@ -1315,6 +1316,7 @@ async function showItemModal(orderId, itemId = null, brand = '', model = '') {
               + Создать услугу
             </button>
           </div>
+          <div id="price-variant-wrap" style="margin-top:10px"></div>
         </div>
 
         <div class="form-group">
@@ -1384,6 +1386,7 @@ async function showItemModal(orderId, itemId = null, brand = '', model = '') {
         data.full_rate = !!document.querySelector('#item-form [name=full_rate]')?.checked;
       }
       data.service_id = data.service_id ? parseInt(data.service_id) : null;
+      data.price_variant = data.service_id ? (data.price_variant || null) : null;
 
       try {
         if (itemId) {
@@ -1400,6 +1403,9 @@ async function showItemModal(orderId, itemId = null, brand = '', model = '') {
       }
     },
   });
+
+  // При редактировании позиции из справочника показываем её варианты цены
+  if (item?.service_id) _loadPriceVariants(item.service_id, brand, model, item.price_variant, false);
 }
 
 async function onCatalogServiceSelected(serviceId, brand, model) {
@@ -1409,21 +1415,64 @@ async function onCatalogServiceSelected(serviceId, brand, model) {
 
   document.getElementById('item-work-name').value = serviceName;
   document.getElementById('item-service-id').value = serviceId;
+  document.getElementById('item-price-variant').value = '';
 
+  await _loadPriceVariants(serviceId, brand, model, null, true);
+}
+
+function _priceRuleLabel(o) {
+  const scope = o.brand ? [o.brand, o.model].filter(Boolean).join(' ') : 'Все авто';
+  return `${scope}${o.variant ? ' · ' + o.variant : ''} — ${App.formatMoney(o.price)}`;
+}
+
+/**
+ * Подставляет цену услуги под авто. Если у услуги есть цены с особенностями
+ * (кузов, привод), показывает список, чтобы выбрать нужную.
+ * applyPrice=false — при редактировании позиции цену не перезаписываем, пока не выберут вариант.
+ */
+async function _loadPriceVariants(serviceId, brand, model, currentVariant, applyPrice) {
+  const wrap = document.getElementById('price-variant-wrap');
   try {
     const qs = new URLSearchParams({ service_id: serviceId });
     if (brand) qs.append('brand', brand);
     if (model) qs.append('model', model);
+    if (currentVariant) qs.append('variant', currentVariant);
 
-    const priceInfo = await App.api(`/services/resolve-price/check?${qs.toString()}`);
-    if (priceInfo && priceInfo.price !== undefined) {
-      document.getElementById('item-price').value = priceInfo.price;
+    const info = await App.api(`/services/resolve-price/check?${qs.toString()}`);
+    if (!info) return;
+    if (applyPrice) {
+      document.getElementById('item-price').value = info.price;
+      document.getElementById('item-price-variant').value = info.variant || '';
       const badge = document.getElementById('price-resolved-badge');
-      if (priceInfo.match_type === 'brand_model') badge.textContent = `(спец. цена для ${brand} ${model})`;
-      else if (priceInfo.match_type === 'brand') badge.textContent = `(цена для марки ${brand})`;
+      if (info.match_type === 'brand_model') badge.textContent = `(спец. цена для ${brand} ${model})`;
+      else if (info.match_type === 'brand') badge.textContent = `(цена для марки ${brand})`;
       else badge.textContent = `(базовая цена)`;
     }
+
+    const options = info.options || [];
+    if (!wrap) return;
+    if (!options.some(o => o.variant)) {
+      wrap.innerHTML = '';
+      return;
+    }
+    const selectedId = options.find(o => (o.variant || '') === (info.variant || '') && o.price === info.price)?.id;
+    wrap.innerHTML = `
+      <label>Цена с особенностью (кузов, привод…)</label>
+      <select class="form-control" id="select-price-variant" onchange="onPriceVariantSelected(this)">
+        ${options.map(o => `
+          <option value="${o.id}" data-price="${o.price}" data-variant="${App.escHtml(o.variant || '')}" ${o.id === selectedId ? 'selected' : ''}>
+            ${App.escHtml(_priceRuleLabel(o))}
+          </option>`).join('')}
+      </select>`;
   } catch {}
+}
+
+function onPriceVariantSelected(select) {
+  const opt = select.options[select.selectedIndex];
+  document.getElementById('item-price').value = opt.dataset.price;
+  document.getElementById('item-price-variant').value = opt.dataset.variant;
+  const badge = document.getElementById('price-resolved-badge');
+  if (badge) badge.textContent = opt.dataset.variant ? `(${opt.dataset.variant})` : '';
 }
 
 async function inlineCreateService(brand, model) {
