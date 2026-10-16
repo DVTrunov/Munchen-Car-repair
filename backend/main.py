@@ -25,7 +25,7 @@ load_dotenv()
 from database import engine, SessionLocal
 import models
 from auth import get_password_hash
-from routers import auth, users, clients, vehicles, orders, employees, analytics, services, service_categories, print_templates, shared, vehicle_history
+from routers import auth, users, clients, vehicles, orders, employees, analytics, services, service_categories, print_templates, shared, vehicle_history, roles
 
 logging.basicConfig(
     level=logging.INFO,
@@ -78,6 +78,19 @@ def seed_database() -> None:
             logger.info("Добавлена колонка mileage в таблицу orders")
     except Exception as e:
         logger.warning(f"Миграция mileage: {e}")
+
+    # Ensure completed_at column exists in order_items table for existing databases
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(engine)
+        cols = [c["name"] for c in inspector.get_columns("order_items")]
+        if "completed_at" not in cols:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE order_items ADD COLUMN completed_at DATETIME"))
+                conn.commit()
+            logger.info("Добавлена колонка completed_at в таблицу order_items")
+    except Exception as e:
+        logger.warning(f"Миграция completed_at: {e}")
 
     db = SessionLocal()
     try:
@@ -193,6 +206,7 @@ app.include_router(service_categories.router, prefix="/api/service-categories", 
 app.include_router(print_templates.router, prefix="/api/print-templates", tags=["print-templates"])
 app.include_router(shared.router,          prefix="/api/shared",          tags=["shared"])
 app.include_router(vehicle_history.router, prefix="/api/vehicle-history",  tags=["vehicle-history"])
+app.include_router(roles.router,           prefix="/api/roles",           tags=["roles"])
 
 
 # ─── Static uploads (user uploaded images) ────────────────────────────────────

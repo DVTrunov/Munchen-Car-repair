@@ -9,7 +9,7 @@ const App = {
   user: null,   // { username, role }
 
   // ─── Initialization ───────────────────────────────────────────────────────
-  init() {
+  async init() {
     this.token = localStorage.getItem('sto_token');
     const u = localStorage.getItem('sto_user');
     if (u) this.user = JSON.parse(u);
@@ -30,6 +30,7 @@ const App = {
     if (sidebarClose) sidebarClose.addEventListener('click', () => this.closeMobileSidebar());
     if (backdrop) backdrop.addEventListener('click', () => this.closeMobileSidebar());
 
+    if (this.token) await this._loadSession();
     this._route();
   },
 
@@ -159,6 +160,11 @@ const App = {
       if (id) return renderVehicleHistory(id);
     }
 
+    if (path === '/my-report') {
+      if (this.user?.employee_id) return renderMyReport();
+      else return renderOrders();
+    }
+
     if (path === '/analytics') {
       if (this.isOwner()) return renderAnalytics();
       else return renderOrders();
@@ -191,12 +197,26 @@ const App = {
   },
 
   // ─── Auth ─────────────────────────────────────────────────────────────────
-  login(token, user) {
+  async login(token, user) {
     this.token = token;
     this.user = user;
     localStorage.setItem('sto_token', token);
     localStorage.setItem('sto_user', JSON.stringify(user));
-    this.navigate('/orders');
+    await this._loadSession();
+    if (window.location.hash === '#/orders') this._route();
+    else this.navigate('/orders');
+  },
+
+  /** Права ролей и привязка к сотруднику — нужны до отрисовки страниц */
+  async _loadSession() {
+    const [, me] = await Promise.all([
+      Permissions.load(),
+      this.api('/auth/me').catch(() => null),
+    ]);
+    if (me && this.user) {
+      this.user.employee_id = me.employee_id;
+      localStorage.setItem('sto_user', JSON.stringify(this.user));
+    }
   },
 
   logout() {
@@ -238,6 +258,11 @@ const App = {
       if (!el) continue;
       const allowed = Permissions.can(role, feat);
       el.classList.toggle('hidden', !allowed);
+    }
+    // Отчёт по выработке есть только у пользователя, привязанного к сотруднику
+    const myReport = document.getElementById('nav-my-report');
+    if (myReport) {
+      myReport.classList.toggle('hidden', !(this.user?.employee_id && Permissions.can(role, 'nav.my_report')));
     }
 
     // User info

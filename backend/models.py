@@ -146,6 +146,7 @@ class OrderItem(Base):
     service_id = Column(Integer, ForeignKey("services.id"), nullable=True)  # если позиция создана из справочника — можно пересчитать цену
     price = Column(Float, nullable=False, default=0.0)
     status = Column(SAEnum(OrderItemStatus), default=OrderItemStatus.pending, nullable=False)
+    completed_at = Column(DateTime, nullable=True)  # когда работа переведена в «Выполнено» — для отчёта по выработке
 
     order = relationship("Order", back_populates="items")
     employee = relationship("Employee", back_populates="order_items")
@@ -247,3 +248,11 @@ class OrderComment(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     order = relationship("Order", back_populates="comments")
+
+# ─── App Settings (ключ → JSON) ──────────────────────────────────────────────
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    key = Column(String(100), primary_key=True)
+    value = Column(Text, nullable=False, default="{}")  # JSON-строка

@@ -1,7 +1,9 @@
 """Employees CRUD router with workload endpoint."""
-from typing import List
+from datetime import date, datetime
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -137,16 +139,25 @@ def delete_employee(
     db.commit()
 
 
+def _get_employee_for_user(db: Session, employee_id: int, user: models.User) -> models.Employee:
+    """Сотрудник по id. Выработку и зарплату видит только владелец и сам сотрудник."""
+    employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Сотрудник не найден")
+    role = user.role.value if hasattr(user.role, "value") else str(user.role)
+    if role != "owner" and employee.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Можно смотреть только свою выработку")
+    return employee
+
+
 @router.get("/{employee_id}/workload")
 def get_employee_workload(
     employee_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(get_current_user),
 ):
     """Return all work items assigned to an employee with total and estimated salary."""
-    employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
-    if not employee:
-        raise HTTPException(status_code=404, detail="Сотрудник не найден")
+    employee = _get_employee_for_user(db, employee_id, current_user)
 
     items = (
         db.query(models.OrderItem)
@@ -181,4 +192,89 @@ def get_employee_workload(
         ],
         "total_amount": total_amount,
         "estimated_salary": estimated_salary,
+    }
+
+
+@router.get("/{employee_id}/report")
+def get_employee_report(
+    employee_id: int,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Отчёт по выработке за период: выполненные работы, их сумма и заработок.
+    Работа попадает в период по дате выполнения (completed_at); для работ,
+    выполненных до появления этого поля, — по дате заказ-наряда.
+    По умолчанию — текущий месяц.
+    """
+    employee = _get_employee_for_user(db, employee_id, current_user)
+
+    today = date.today()
+    date_from = date_from or today.replace(day=1)
+    date_to = date_to or today
+    if date_from > date_to:
+        raise HTTPException(status_code=422, detail="Дата начала периода позже даты окончания")
+    start = datetime.combine(date_from, datetime.min.time())
+    end = datetime.combine(date_to, datetime.max.time())
+
+    done_at = func.coalesce(models.OrderItem.completed_at, models.Order.created_at)
+    done_items = (
+        db.query(models.OrderItem)
+        .join(models.Order, models.OrderItem.order_id == models.Order.id)
+        .filter(
+            models.OrderItem.employee_id == employee.id,
+            models.OrderItem.status == models.OrderItemStatus.done,
+            done_at >= start,
+            done_at <= end,
+        )
+        .order_by(done_at.desc())
+        .all()
+    )
+    unfinished = (
+        db.query(models.OrderItem)
+        .filter(
+            models.OrderItem.employee_id == employee.id,
+            models.OrderItem.status != models.OrderItemStatus.done,
+        )
+        .all()
+    )
+
+    is_percent = employee.rate_type == models.RateType.percent
+    total_amount = round(sum(i.price for i in done_items), 2)
+
+    def vehicle_label(order: models.Order) -> Optional[str]:
+        v = order.vehicle
+        if not v:
+            return None
+        return " ".join(x for x in (v.brand, v.model, v.plate_number or "") if x)
+
+    return {
+        "employee": {
+            "id": employee.id,
+            "full_name": employee.full_name,
+            "rate_type": employee.rate_type.value,
+            "rate_value": employee.rate_value,
+        },
+        "date_from": date_from,
+        "date_to": date_to,
+        "items": [
+            {
+                "id": i.id,
+                "order_id": i.order_id,
+                "work_name": i.work_name,
+                "vehicle": vehicle_label(i.order),
+                "completed_at": i.completed_at or i.order.created_at,
+                "price": i.price,
+                "earning": round(i.price * employee.rate_value / 100, 2) if is_percent else None,
+            }
+            for i in done_items
+        ],
+        "works_count": len(done_items),
+        "total_amount": total_amount,
+        # При фиксированной ставке заработок от работ не зависит — отдаём оклад за месяц
+        "salary": round(total_amount * employee.rate_value / 100, 2) if is_percent else employee.rate_value,
+        "unfinished_count": len(unfinished),
+        "unfinished_amount": round(sum(i.price for i in unfinished), 2),
     }

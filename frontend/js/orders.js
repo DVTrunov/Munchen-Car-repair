@@ -31,12 +31,13 @@ async function renderOrders() {
     date_to: params.get('date_to') || '',
     client_id: params.get('client_id') || '',
   };
+  const scoped = Permissions.isOrderScoped();
 
   App.setContent(`
     <div class="page-header">
       <div>
         <h1 class="page-title">Заказ-наряды</h1>
-        <p class="page-subtitle">Все работы вашего автосервиса</p>
+        <p class="page-subtitle">${scoped ? 'Заказ-наряды, в которых вы исполнитель' : 'Все работы вашего автосервиса'}</p>
       </div>
       <div class="flex gap-2">
         <button class="btn btn-secondary filter-toggle-btn" id="btn-toggle-filters" onclick="toggleOrderFilters()">
@@ -46,10 +47,11 @@ async function renderOrders() {
           <span>Фильтры</span>
           <span id="filters-badge" class="badge-filter-count hidden">0</span>
         </button>
+        ${scoped ? '' : `
         <button class="btn btn-primary" id="btn-new-order">
           <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd"/></svg>
           + Новый заказ
-        </button>
+        </button>`}
       </div>
     </div>
     <div class="page-body">
@@ -69,7 +71,7 @@ async function renderOrders() {
     </div>
   `);
 
-  document.getElementById('btn-new-order').addEventListener('click', createInstantOrder);
+  document.getElementById('btn-new-order')?.addEventListener('click', createInstantOrder);
   document.getElementById('btn-filter-apply').addEventListener('click', applyOrderFilters);
   document.getElementById('btn-filter-reset').addEventListener('click', () => {
     document.getElementById('filter-status').value = '';
@@ -134,9 +136,15 @@ async function loadOrders(filters = {}) {
     if (filters.client_id) qs.append('client_id', filters.client_id);
 
     const orders = await App.api(`/orders/?${qs.toString()}`);
+    const scoped = Permissions.isOrderScoped();
 
     if (!orders || orders.length === 0) {
-      wrap.innerHTML = `
+      wrap.innerHTML = scoped ? `
+        <div class="empty-state">
+          <div class="empty-state-icon">📋</div>
+          <h3>Заказ-нарядов нет</h3>
+          <p>Пока нет заказ-нарядов, где вы назначены исполнителем</p>
+        </div>` : `
         <div class="empty-state">
           <div class="empty-state-icon">📋</div>
           <h3>Заказ-нарядов нет</h3>
@@ -156,7 +164,7 @@ async function loadOrders(filters = {}) {
               <th>Клиент</th>
               <th>Автомобиль</th>
               <th>Статус</th>
-              <th>Сумма</th>
+              <th>${scoped ? 'Сумма ваших работ' : 'Сумма'}</th>
               <th></th>
             </tr>
           </thead>
@@ -254,7 +262,7 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
         <button class="btn btn-sm btn-secondary" id="btn-print" onclick="openPrintModal(${order.id})">
           🖨 Печать
         </button>
-        ${Permissions.can(App.user?.role, 'order.share') ? `
+        ${Permissions.can(App.user?.role, 'order.share') && !order.scoped ? `
         <button class="btn btn-sm btn-secondary" id="btn-share" onclick="shareOrder(${order.id})" title="Поделиться с клиентом">
           🔗 Поделиться
         </button>` : ''}
@@ -359,7 +367,7 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
                   <button class="btn btn-secondary" id="btn-save-mileage" style="flex-shrink:0">Сохранить</button>
                 </div>
                 ${order.mileage ? `<div class="text-sm text-muted" style="margin-top:4px">Текущий пробег: <strong>${order.mileage.toLocaleString('ru-RU')} км</strong></div>` : ''}
-                ${order.vehicle_id ? `
+                ${order.vehicle_id && !order.scoped ? `
                   <div style="margin-top:8px">
                     <a href="#/vehicle-history/${order.vehicle_id}" style="font-size:12px;color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px">
                       <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg>
@@ -370,6 +378,13 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
               </div>
 
               <!-- Totals breakdown -->
+              ${order.scoped ? `
+              <div class="order-totals">
+                <div class="order-totals-row total">
+                  <span class="label">🔧 Сумма ваших работ</span>
+                  <span class="value">${App.formatMoney(servicesTotal)}</span>
+                </div>
+              </div>` : `
               <div class="order-totals">
                 <div class="order-totals-row">
                   <span class="label">🔧 Сумма работ</span>
@@ -383,7 +398,7 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
                   <span class="label">Итого</span>
                   <span class="value">${App.formatMoney(totalAmount)}</span>
                 </div>
-              </div>
+              </div>`}
             </div>
           </div>
 
@@ -397,7 +412,7 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
             <!-- Tab navigation -->
             <div class="card-tabs">
               <div class="card-tab active" id="tab-works" onclick="switchOrderTab('works', ${order.id}, '${order.vehicle?.brand || ''}', '${order.vehicle?.model || ''}')">
-                🔧 Работы <span style="font-size:11px;opacity:.7">(${order.items.length})</span>
+                🔧 ${order.scoped ? 'Мои работы' : 'Работы'} <span style="font-size:11px;opacity:.7">(${order.items.length})</span>
               </div>
               <div class="card-tab" id="tab-parts" onclick="switchOrderTab('parts', ${order.id}, '${order.vehicle?.brand || ''}', '${order.vehicle?.model || ''}')">
                 🔩 Запчасти и материалы <span style="font-size:11px;opacity:.7">(${(order.parts || []).length})</span>
@@ -1323,11 +1338,16 @@ async function onInlineVehBrandChanged(brandName) {
 
 async function showItemModal(orderId, itemId = null, brand = '', model = '') {
   let employees = [], services = [], item = null;
+  const scoped = Permissions.isOrderScoped();
   try {
-    [employees, services] = await Promise.all([
+    let me = null;
+    [employees, services, me] = await Promise.all([
       App.api('/employees/'),
       App.api('/services/'),
+      scoped ? App.api('/auth/me') : null,
     ]);
+    // Механик с ограниченной видимостью назначает работы только на себя
+    if (scoped) employees = employees.filter(e => e.id === me?.employee_id);
     if (itemId) {
       const order = await App.api(`/orders/${orderId}`);
       item = order?.items?.find(i => i.id === itemId) || null;
@@ -1372,9 +1392,9 @@ async function showItemModal(orderId, itemId = null, brand = '', model = '') {
           <div class="form-group">
             <label>Исполнитель</label>
             <select name="employee_id" class="form-control">
-              <option value="">— Не назначен —</option>
+              ${scoped ? '' : '<option value="">— Не назначен —</option>'}
               ${employees.map(e => `
-                <option value="${e.id}" ${item?.employee_id === e.id ? 'selected' : ''}>
+                <option value="${e.id}" ${item?.employee_id === e.id || scoped ? 'selected' : ''}>
                   ${App.escHtml(e.full_name)}
                 </option>
               `).join('')}

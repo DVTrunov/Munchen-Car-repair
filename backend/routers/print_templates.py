@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse
 
 from database import get_db
 from auth import get_current_user, get_owner_user
+from access import OrderAccess, get_order_access
 import models
 from sqlalchemy.orm import Session
 
@@ -94,7 +95,7 @@ async def upload_template(
 def generate_order_doc(
     order_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
     if not os.path.isfile(TEMPLATE_FILE):
         raise HTTPException(
@@ -103,8 +104,10 @@ def generate_order_doc(
         )
 
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
+    if not order or not access.can_see_order(order):
         raise HTTPException(status_code=404, detail="Заказ-наряд не найден")
+    # Механик с ограниченной видимостью печатает только свои работы
+    items = access.visible_items(order)
 
     try:
         from docx import Document
@@ -176,9 +179,9 @@ def generate_order_doc(
                 tcPr.append(vAlign)
 
     # ─── Prepare data ─────────────────────────────────────────────────────────
-    services_total = round(sum(item.price for item in order.items), 2)
+    services_total = round(sum(item.price for item in items), 2)
     parts_total = round(sum(p.price * p.qty for p in order.parts), 2)
-    total_amount = round(services_total + parts_total, 2)
+    total_amount = services_total if access.is_scoped else round(services_total + parts_total, 2)
 
     # Gather comments from order.comment and chat order.comments
     comments_list = []
@@ -260,7 +263,7 @@ def generate_order_doc(
         hdr[2].text = "Цена (₸)"
         hdr[3].text = "Статус"
 
-        for item in order.items:
+        for item in items:
             row = table.add_row().cells
             row[0].text = item.work_name
             row[1].text = item.employee.full_name if item.employee else "—"

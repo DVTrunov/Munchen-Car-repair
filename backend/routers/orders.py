@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from auth import get_current_user, get_owner_user
+from access import OrderAccess, get_order_access
 import models
 import schemas
 from notifications import send_notification
@@ -64,20 +65,66 @@ def _resolve_catalog_price(db: Session, service_id: int, brand: Optional[str], m
     return None
 
 
-def _order_to_out(order: models.Order) -> schemas.OrderOut:
-    """Convert ORM order to OrderOut schema with computed totals."""
-    services_total = round(sum(item.price for item in order.items), 2)
+def _order_to_out(order: models.Order, access: OrderAccess) -> schemas.OrderOut:
+    """Convert ORM order to OrderOut schema with computed totals.
+
+    Для роли с ограниченной видимостью в заказе остаются только её работы,
+    а суммы считаются только по ним.
+    """
+    items = access.visible_items(order)
+    services_total = round(sum(item.price for item in items), 2)
     parts_total = round(sum(p.price * p.qty for p in order.parts), 2)
 
     data = schemas.OrderOut.model_validate(order)
     data.services_total = services_total
     data.parts_total = parts_total
 
+    if access.is_scoped:
+        data.items = [schemas.OrderItemOut.model_validate(i) for i in items]
+        data.total_amount = services_total
+        data.sharing_token = None
+        data.scoped = True
+        return data
+
     public_url = os.getenv("PUBLIC_URL", "").strip().rstrip("/")
     if public_url and order.sharing_token:
         data.share_url = f"{public_url}/share/{order.sharing_token}"
 
     return data
+
+
+def _get_order(db: Session, order_id: int, access: OrderAccess) -> models.Order:
+    """Заказ по id; 404, если его нет или он не виден текущему пользователю."""
+    order = db.query(models.Order).filter(models.Order.id == order_id).first()
+    if not order or not access.can_see_order(order):
+        raise HTTPException(status_code=404, detail="Заказ-наряд не найден")
+    return order
+
+
+def _get_item(db: Session, order_id: int, item_id: int, access: OrderAccess) -> models.OrderItem:
+    item = (
+        db.query(models.OrderItem)
+        .filter(models.OrderItem.id == item_id, models.OrderItem.order_id == order_id)
+        .first()
+    )
+    if not item or not access.can_see_item(item):
+        raise HTTPException(status_code=404, detail="Позиция не найдена")
+    return item
+
+
+def _sync_completed_at(item: models.OrderItem) -> None:
+    """Запоминает момент выполнения работы (по нему строится отчёт по выработке)."""
+    if item.status == models.OrderItemStatus.done:
+        if not item.completed_at:
+            item.completed_at = datetime.utcnow()
+    else:
+        item.completed_at = None
+
+
+def _check_item_employee(access: OrderAccess, employee_id: Optional[int]) -> None:
+    """Пользователь с ограниченной видимостью может назначать работы только на себя."""
+    if access.is_scoped and employee_id != access.employee_id:
+        raise HTTPException(status_code=403, detail="Можно назначать работы только на себя")
 
 
 # ─── Orders ──────────────────────────────────────────────────────────────────
@@ -89,10 +136,12 @@ def list_orders(
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
     """List orders with optional filters."""
     query = db.query(models.Order)
+    if access.is_scoped:
+        query = query.filter(models.Order.items.any(models.OrderItem.employee_id == access.employee_id))
     if status:
         query = query.filter(models.Order.status == status)
     if client_id:
@@ -105,34 +154,42 @@ def list_orders(
         query = query.filter(
             models.Order.created_at <= datetime.combine(date_to, datetime.max.time())
         )
-    return query.order_by(models.Order.created_at.desc()).all()
+    orders = query.order_by(models.Order.created_at.desc()).all()
+    if not access.is_scoped:
+        return orders
+
+    result = []
+    for order in orders:
+        row = schemas.OrderListItem.model_validate(order)
+        row.total_amount = round(sum(i.price for i in access.visible_items(order)), 2)
+        result.append(row)
+    return result
 
 
 @router.post("/", response_model=schemas.OrderOut, status_code=201)
 def create_order(
     data: schemas.OrderCreate,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
+    access.require_full_access()
     order = models.Order(**data.model_dump())
     db.add(order)
     db.flush()  # Get order.id before committing
     db.add(models.StatusHistory(order_id=order.id, status=models.OrderStatus.new))
     db.commit()
     db.refresh(order)
-    return _order_to_out(order)
+    return _order_to_out(order, access)
 
 
 @router.get("/{order_id}", response_model=schemas.OrderOut)
 def get_order(
     order_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Заказ-наряд не найден")
-    return _order_to_out(order)
+    order = _get_order(db, order_id, access)
+    return _order_to_out(order, access)
 
 
 @router.put("/{order_id}", response_model=schemas.OrderOut)
@@ -140,11 +197,9 @@ def update_order(
     order_id: int,
     data: schemas.OrderUpdate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Заказ-наряд не найден")
+    order = _get_order(db, order_id, access)
 
     old_status = order.status
 
@@ -168,7 +223,7 @@ def update_order(
 
     db.commit()
     db.refresh(order)
-    return _order_to_out(order)
+    return _order_to_out(order, access)
 
 
 @router.delete("/{order_id}", status_code=204)
@@ -188,17 +243,16 @@ def delete_order(
 def generate_share_link(
     order_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
     """Generate (or return existing) sharing token for an order."""
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Заказ-наряд не найден")
+    access.require_full_access()
+    order = _get_order(db, order_id, access)
     if not order.sharing_token:
         order.sharing_token = str(uuid.uuid4())
         db.commit()
         db.refresh(order)
-    return _order_to_out(order)
+    return _order_to_out(order, access)
 
 
 # ─── Order Items ─────────────────────────────────────────────────────────────
@@ -208,13 +262,13 @@ def add_order_item(
     order_id: int,
     data: schemas.OrderItemCreate,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Заказ-наряд не найден")
+    order = _get_order(db, order_id, access)
+    _check_item_employee(access, data.employee_id)
 
     item = models.OrderItem(order_id=order_id, **data.model_dump())
+    _sync_completed_at(item)
     db.add(item)
     db.flush()
     _recalc_total(order)
@@ -229,18 +283,16 @@ def update_order_item(
     item_id: int,
     data: schemas.OrderItemUpdate,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
-    item = (
-        db.query(models.OrderItem)
-        .filter(models.OrderItem.id == item_id, models.OrderItem.order_id == order_id)
-        .first()
-    )
-    if not item:
-        raise HTTPException(status_code=404, detail="Позиция не найдена")
+    item = _get_item(db, order_id, item_id, access)
+    updates = data.model_dump(exclude_unset=True)
+    if "employee_id" in updates:
+        _check_item_employee(access, updates["employee_id"])
 
-    for key, value in data.model_dump(exclude_unset=True).items():
+    for key, value in updates.items():
         setattr(item, key, value)
+    _sync_completed_at(item)
 
     db.flush()
     _recalc_total(item.order)
@@ -254,15 +306,9 @@ def delete_order_item(
     order_id: int,
     item_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
-    item = (
-        db.query(models.OrderItem)
-        .filter(models.OrderItem.id == item_id, models.OrderItem.order_id == order_id)
-        .first()
-    )
-    if not item:
-        raise HTTPException(status_code=404, detail="Позиция не найдена")
+    item = _get_item(db, order_id, item_id, access)
 
     order = item.order
     db.delete(item)
@@ -277,11 +323,9 @@ def delete_order_item(
 def list_parts(
     order_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Заказ-наряд не найден")
+    order = _get_order(db, order_id, access)
     return order.parts
 
 
@@ -290,11 +334,9 @@ def add_part(
     order_id: int,
     data: schemas.OrderPartCreate,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Заказ-наряд не найден")
+    order = _get_order(db, order_id, access)
 
     part = models.OrderPart(order_id=order_id, **data.model_dump())
     db.add(part)
@@ -311,8 +353,9 @@ def update_part(
     part_id: int,
     data: schemas.OrderPartUpdate,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
+    _get_order(db, order_id, access)
     part = (
         db.query(models.OrderPart)
         .filter(models.OrderPart.id == part_id, models.OrderPart.order_id == order_id)
@@ -336,8 +379,9 @@ def delete_part(
     order_id: int,
     part_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
+    _get_order(db, order_id, access)
     part = (
         db.query(models.OrderPart)
         .filter(models.OrderPart.id == part_id, models.OrderPart.order_id == order_id)
@@ -359,11 +403,9 @@ def delete_part(
 def list_comments(
     order_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Заказ-наряд не найден")
+    order = _get_order(db, order_id, access)
     return order.comments
 
 
@@ -374,10 +416,9 @@ async def add_comment(
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Заказ-наряд не найден")
+    order = _get_order(db, order_id, access)
 
     if not text and not image:
         raise HTTPException(status_code=422, detail="Необходимо указать текст или прикрепить изображение")
@@ -403,8 +444,9 @@ def delete_comment(
     order_id: int,
     comment_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
+    _get_order(db, order_id, access)
     comment = (
         db.query(models.OrderComment)
         .filter(models.OrderComment.id == comment_id, models.OrderComment.order_id == order_id)
@@ -429,7 +471,7 @@ def delete_comment(
 def recalculate_order_prices(
     order_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
     """
     Пересчитывает цены позиций заказа, добавленных из справочника услуг (у которых
@@ -437,14 +479,12 @@ def recalculate_order_prices(
     Позиции, введённые вручную (без привязки к услуге), не трогаются — для них
     неизвестно, по какому правилу цены их пересчитывать.
     """
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Заказ-наряд не найден")
+    order = _get_order(db, order_id, access)
     if not order.vehicle:
         raise HTTPException(status_code=400, detail="К заказу не привязан автомобиль — пересчёт цен невозможен")
 
     updated_count = 0
-    for item in order.items:
+    for item in access.visible_items(order):
         if not item.service_id:
             continue
         new_price = _resolve_catalog_price(db, item.service_id, order.vehicle.brand, order.vehicle.model)
@@ -455,4 +495,4 @@ def recalculate_order_prices(
     _recalc_total(order)
     db.commit()
     db.refresh(order)
-    return schemas.RecalculatePricesOut(updated_count=updated_count, order=_order_to_out(order))
+    return schemas.RecalculatePricesOut(updated_count=updated_count, order=_order_to_out(order, access))

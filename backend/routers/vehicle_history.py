@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from database import get_db
-from auth import get_current_user
+from access import OrderAccess, get_order_access
 import models
 
 router = APIRouter()
@@ -67,8 +67,10 @@ class VehicleHistoryOut(BaseModel):
 def get_vehicle_history(
     vehicle_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
+    # История содержит все работы и суммы по авто — роли «только свои работы» она недоступна
+    access.require_full_access()
     """Возвращает историю обслуживания автомобиля."""
     vehicle = db.query(models.Vehicle).filter(models.Vehicle.id == vehicle_id).first()
     if not vehicle:
@@ -125,8 +127,10 @@ def get_vehicle_history(
 def export_vehicle_history(
     vehicle_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    access: OrderAccess = Depends(get_order_access),
 ):
+    # История содержит все работы и суммы по авто — роли «только свои работы» она недоступна
+    access.require_full_access()
     """Генерирует красивый DOCX-отчёт истории обслуживания автомобиля."""
     vehicle = db.query(models.Vehicle).filter(models.Vehicle.id == vehicle_id).first()
     if not vehicle:

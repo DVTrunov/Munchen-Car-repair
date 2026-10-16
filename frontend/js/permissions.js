@@ -1,8 +1,10 @@
 /**
  * permissions.js — Role-based access control and custom roles management for the STO CRM.
  *
- * Permissions & custom roles are stored in localStorage so the owner can configure
- * both built-in and new custom roles dynamically without backend schema limits.
+ * Permissions & custom roles are stored on the server (/api/roles/config), so settings
+ * made by the owner apply to every user on every device. Call Permissions.load()
+ * after login; the rest of the API is synchronous and reads the loaded copy.
+ * Visibility of orders ('orders.scope') is also enforced by the backend.
  */
 const Permissions = (() => {
 
@@ -23,12 +25,14 @@ const Permissions = (() => {
       'nav.analytics': true,
       'nav.roles':     true,
       'nav.users':     true,
+      'nav.my_report': true,
       'print.placeholders': true,
       'print.upload':       true,
       'print.generate':     true,
       'order.delete':  true,
       'order.share':   true,
       'order.comments':true,
+      'orders.scope':  'all',
     },
     manager: {
       'nav.orders':    true,
@@ -38,12 +42,14 @@ const Permissions = (() => {
       'nav.analytics': false,
       'nav.roles':     false,
       'nav.users':     false,
+      'nav.my_report': true,
       'print.placeholders': false,
       'print.upload':       false,
       'print.generate':     true,
       'order.delete':  false,
       'order.share':   true,
       'order.comments':true,
+      'orders.scope':  'all',
     },
     mechanic: {
       'nav.orders':    true,
@@ -53,20 +59,36 @@ const Permissions = (() => {
       'nav.analytics': false,
       'nav.roles':     false,
       'nav.users':     false,
+      'nav.my_report': true,
       'print.placeholders': false,
       'print.upload':       false,
       'print.generate':     true,
       'order.delete':  false,
       'order.share':   false,
       'order.comments':true,
+      'orders.scope':  'assigned',
     },
   };
 
-  const STORAGE_KEY_PERMS = 'sto_permissions';
-  const STORAGE_KEY_CUSTOM_ROLES = 'sto_custom_roles';
+  // Старые ключи localStorage — только для однократного переноса настроек на сервер
+  const LEGACY_KEY_PERMS = 'sto_permissions';
+  const LEGACY_KEY_CUSTOM_ROLES = 'sto_custom_roles';
+
+  const ORDER_SCOPE_OPTIONS = [
+    { value: 'all',      label: 'Все заказ-наряды целиком' },
+    { value: 'assigned', label: 'Только где он исполнитель — и только свои работы' },
+  ];
 
   // ── Feature catalogue (for the UI) ──────────────────────────────────────────
   const FEATURE_GROUPS = [
+    {
+      group: 'Видимость заказ-нарядов',
+      features: [
+        { key: 'orders.scope', type: 'select', options: ORDER_SCOPE_OPTIONS,
+          label: 'Какие заказ-наряды видит роль',
+          hint: 'При «только свои работы» сумма заказа считается только по работам сотрудника' },
+      ]
+    },
     {
       group: 'Навигация (боковое меню)',
       features: [
@@ -77,6 +99,7 @@ const Permissions = (() => {
         { key: 'nav.analytics', label: 'Аналитика' },
         { key: 'nav.roles',     label: 'Управление ролями' },
         { key: 'nav.users',     label: 'Пользователи' },
+        { key: 'nav.my_report', label: 'Моя выработка (отчёт сотрудника)' },
       ]
     },
     {
@@ -98,26 +121,42 @@ const Permissions = (() => {
   ];
 
   // ── Internal helpers for roles & perms ───────────────────────────────────────
-  function _loadCustomRoles() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY_CUSTOM_ROLES);
-      return raw ? JSON.parse(raw) : [];
-    } catch { return []; }
-  }
+  // Копия настроек, загруженная с сервера
+  let _config = { custom_roles: [], permissions: {} };
 
-  function _saveCustomRoles(roles) {
-    localStorage.setItem(STORAGE_KEY_CUSTOM_ROLES, JSON.stringify(roles));
+  function _loadCustomRoles() {
+    return JSON.parse(JSON.stringify(_config.custom_roles || []));
   }
 
   function _loadPerms() {
+    return _config.permissions || {};
+  }
+
+  async function _persist(custom_roles, permissions) {
+    const saved = await App.api('/roles/config', {
+      method: 'PUT',
+      body: { custom_roles, permissions },
+    });
+    if (saved) _config = saved;
+  }
+
+  function _readLegacy(key) {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY_PERMS);
+      const raw = localStorage.getItem(key);
       return raw ? JSON.parse(raw) : null;
     } catch { return null; }
   }
 
-  function _savePerms(data) {
-    localStorage.setItem(STORAGE_KEY_PERMS, JSON.stringify(data));
+  /** Однократно переносит настройки, сохранённые раньше в браузере владельца, на сервер */
+  async function _migrateLegacy() {
+    const perms = _readLegacy(LEGACY_KEY_PERMS);
+    const roles = _readLegacy(LEGACY_KEY_CUSTOM_ROLES);
+    if (!perms && !roles) return;
+    const serverEmpty = !(_config.custom_roles || []).length
+      && !Object.keys(_config.permissions || {}).length;
+    if (serverEmpty) await _persist(roles || [], perms || {});
+    localStorage.removeItem(LEGACY_KEY_PERMS);
+    localStorage.removeItem(LEGACY_KEY_CUSTOM_ROLES);
   }
 
   function _getPerms() {
@@ -147,6 +186,17 @@ const Permissions = (() => {
   return {
     FEATURE_GROUPS,
 
+    /** Load role settings from the server. Call after login, before rendering pages. */
+    async load() {
+      try {
+        const data = await App.api('/roles/config');
+        if (data) _config = data;
+        if (App.isOwner()) await _migrateLegacy();
+      } catch (err) {
+        console.warn('Не удалось загрузить настройки ролей:', err);
+      }
+    },
+
     /** Get all available roles (built-in + custom) */
     getRoles() {
       const custom = _loadCustomRoles();
@@ -175,7 +225,7 @@ const Permissions = (() => {
     },
 
     /** Add a new custom role */
-    addRole({ id, label, icon, copyFrom }) {
+    async addRole({ id, label, icon, copyFrom }) {
       if (!id || !label) throw new Error('Укажите идентификатор и название роли');
       const cleanId = id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
       const all = this.getRoles();
@@ -190,7 +240,6 @@ const Permissions = (() => {
         icon: (icon || '👤').trim(),
         isBuiltin: false
       });
-      _saveCustomRoles(custom);
 
       // Initialize permissions for this role
       const perms = _getPerms();
@@ -205,39 +254,40 @@ const Permissions = (() => {
           'nav.services': false,
           'nav.analytics': false,
           'nav.roles': false,
+          'nav.my_report': true,
           'print.placeholders': false,
           'print.upload': false,
           'print.generate': true,
           'order.delete': false,
           'order.share': false,
           'order.comments': true,
+          'orders.scope': 'assigned',
         };
       }
-      _savePerms(perms);
+      await _persist(custom, perms);
       return cleanId;
     },
 
     /** Update an existing custom role metadata */
-    updateRole(id, { label, icon }) {
+    async updateRole(id, { label, icon }) {
       const custom = _loadCustomRoles();
       const idx = custom.findIndex(r => r.id === id);
       if (idx === -1) throw new Error('Кастомная роль не найдена');
       if (label) custom[idx].label = label.trim();
       if (icon) custom[idx].icon = icon.trim();
-      _saveCustomRoles(custom);
+      await _persist(custom, _getPerms());
     },
 
     /** Delete a custom role */
-    deleteRole(id) {
+    async deleteRole(id) {
       const builtin = BUILTIN_ROLES.find(r => r.id === id);
       if (builtin) throw new Error('Нельзя удалить системную встроенную роль');
       let custom = _loadCustomRoles();
       custom = custom.filter(r => r.id !== id);
-      _saveCustomRoles(custom);
 
       const perms = _getPerms();
       delete perms[id];
-      _savePerms(perms);
+      await _persist(custom, perms);
     },
 
     /** Check if a given role has access to a feature */
@@ -251,21 +301,32 @@ const Permissions = (() => {
       return rolePerms[feature] === true;
     },
 
+    /** Get a non-boolean setting for a role (e.g. 'orders.scope') */
+    getValue(role, feature) {
+      if (feature === 'orders.scope' && role === 'owner') return 'all';
+      const value = _getPerms()[role]?.[feature];
+      return value ?? (feature === 'orders.scope' ? 'all' : null);
+    },
+
+    /** True if the current user sees only orders/works assigned to them */
+    isOrderScoped() {
+      return this.getValue(App.user?.role, 'orders.scope') === 'assigned';
+    },
+
     /** Get all permissions as a plain object */
     getAll() { return _getPerms(); },
 
     /** Save all permissions (from settings UI) */
-    saveAll(data) { _savePerms(data); },
+    async saveAll(data) { await _persist(_loadCustomRoles(), data); },
 
-    /** Reset all permissions to defaults and clear custom roles if requested */
-    resetDefaults() {
-      localStorage.removeItem(STORAGE_KEY_PERMS);
+    /** Reset all permissions to defaults (custom roles are kept) */
+    async resetDefaults() {
+      await _persist(_loadCustomRoles(), {});
     },
 
     /** Reset everything including custom roles */
-    resetAll() {
-      localStorage.removeItem(STORAGE_KEY_PERMS);
-      localStorage.removeItem(STORAGE_KEY_CUSTOM_ROLES);
+    async resetAll() {
+      await _persist([], {});
     }
   };
 })();
