@@ -231,7 +231,7 @@ async function showEmployeeModal(id = null) {
             placeholder="Для % — от 0 до 100; для фикс. — сумма в тенге" />
         </div>
         <p class="text-muted" style="font-size:12px;margin-top:12px;padding:10px;background:rgba(255,255,255,0.04);border-radius:8px;border-left:3px solid var(--accent);">
-          💡 Для выдачи логина/пароля перейдите в раздел <a href="#/users" style="color:var(--accent);">Пользователи</a> и привяжите учётную запись к этому сотруднику.
+          💡 Для выдачи логина/пароля перейдите в раздел <a href="#/settings/users" style="color:var(--accent);">Настройки → Пользователи</a> и привяжите учётную запись к этому сотруднику.
         </p>
       </form>
     `,

@@ -122,6 +122,18 @@ input, select, textarea { font-family: inherit; }
   gap: 10px;
 }
 
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.brand-logo img {
+  object-fit: contain;
+  border-radius: 4px;
+}
+
 .sidebar-brand {
   font-weight: 700;
   font-size: 15px;
@@ -2037,5 +2049,36 @@ tbody tr:hover { background: rgba(255,255,255,0.02); }
 @media (max-width: 768px) {
   .card .table-wrap {
     margin: 0;
+  }
+}
+
+/* ─── Settings ──────────────────────────────────────────────────────────── */
+.settings-header {
+  padding: 24px 28px 0;
+}
+
+.settings-tabs {
+  padding: 0;
+  margin-top: 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.settings-tabs .card-tab {
+  text-decoration: none;
+}
+
+.settings-logo-preview {
+  min-width: 80px;
+  height: 80px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+@media (max-width: 768px) {
+  .settings-header {
+    padding: 16px 14px 0;
   }
 }

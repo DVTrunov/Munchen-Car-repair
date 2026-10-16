@@ -5,16 +5,8 @@ function renderLogin() {
     <div class="login-page">
       <div class="login-box">
         <div class="login-logo">
-          <div class="login-logo-icon">
-            <svg width="32" height="32" viewBox="0 0 28 28" fill="none">
-              <rect width="28" height="28" rx="8" fill="#f59e0b"/>
-              <path d="M7 18l3-8h8l3 8" stroke="#0f1117" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <circle cx="10" cy="19.5" r="1.5" fill="#0f1117"/>
-              <circle cx="18" cy="19.5" r="1.5" fill="#0f1117"/>
-              <path d="M5 14h18" stroke="#0f1117" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
-          </div>
-          <h1>Автосервис München</h1>
+          <div class="login-logo-icon brand-logo">${App.logoHtml(40)}</div>
+          <h1>${App.escHtml(App.company.name)}</h1>
           <p>Система управления автосервисом</p>
         </div>
 

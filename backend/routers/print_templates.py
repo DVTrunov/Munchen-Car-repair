@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse
 from database import get_db
 from auth import get_current_user, get_owner_user
 from access import OrderAccess, get_order_access
+from routers.settings import load_company, logo_file_path
 import models
 from sqlalchemy.orm import Session
 
@@ -34,6 +35,11 @@ os.makedirs(GENERATED_DIR, exist_ok=True)
 # ─── Placeholders List ────────────────────────────────────────────────────────
 
 PLACEHOLDERS = [
+    {"key": "{{company_name}}",     "description": "Название автосервиса (из настроек)"},
+    {"key": "{{company_address}}",  "description": "Адрес автосервиса (из настроек)"},
+    {"key": "{{company_phone}}",    "description": "Телефон автосервиса (из настроек)"},
+    {"key": "{{company_contacts}}", "description": "Адрес и телефон одной строкой через «·»"},
+    {"key": "{{company_logo}}",     "description": "Логотип автосервиса (ставьте отдельной строкой)"},
     {"key": "{{order_id}}",         "description": "Номер заказ-наряда"},
     {"key": "{{order_date}}",       "description": "Дата создания заказа"},
     {"key": "{{order_status}}",     "description": "Статус заказа (на русском)"},
@@ -200,7 +206,14 @@ def generate_order_doc(
 
     comments_str = "\n".join(comments_list) if comments_list else "—"
 
+    company = load_company(db)
+    contacts = " · ".join(v for v in (company["address"], company["phone"]) if v)
+
     replacements: Dict[str, str] = {
+        "{{company_name}}":     company["name"],
+        "{{company_address}}":  company["address"] or "",
+        "{{company_phone}}":    company["phone"] or "",
+        "{{company_contacts}}": contacts,
         "{{order_id}}":         str(order.id),
         "{{order_date}}":       order.created_at.strftime("%d.%m.%Y"),
         "{{order_status}}":     STATUS_LABELS.get(order.status.value, order.status.value),
@@ -308,9 +321,20 @@ def generate_order_doc(
         parent.insert(idx, tbl_elem)
         parent.remove(tbl_para)
 
+    def insert_logo(para):
+        """Заменяет абзац с {{company_logo}} картинкой логотипа (или убирает плейсхолдер)."""
+        from docx.shared import Cm
+        for r in para.runs:
+            r.text = ""
+        path = logo_file_path(company)
+        if path:
+            (para.runs[0] if para.runs else para.add_run()).add_picture(path, height=Cm(2))
+
     def process_paragraph(para):
         full_text = para.text
-        if "{{table_services}}" in full_text:
+        if "{{company_logo}}" in full_text:
+            insert_logo(para)
+        elif "{{table_services}}" in full_text:
             insert_services_table(para)
         elif "{{table_parts}}" in full_text:
             insert_parts_table(para)
