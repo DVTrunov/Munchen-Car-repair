@@ -7,7 +7,7 @@ All Out schemas use `from_attributes = True` for ORM compatibility.
 import re
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, field_validator, ConfigDict
+from pydantic import BaseModel, field_validator, ConfigDict, Field
 from models import UserRole, OrderStatus, OrderItemStatus, EmployeeRole, RateType
 
 
@@ -184,11 +184,17 @@ class EmployeeShort(BaseModel):
 
 # ─── OrderItem ───────────────────────────────────────────────────────────────
 
+Discount = Field(0.0, ge=0, le=100, description="Скидка в процентах")
+OptionalDiscount = Field(None, ge=0, le=100, description="Скидка в процентах")
+
+
 class OrderItemBase(BaseModel):
     work_name: str
     employee_id: Optional[int] = None
     service_id: Optional[int] = None  # если позиция создана из справочника — можно пересчитать цену при смене авто
     price: float = 0.0
+    discount: float = Discount
+    full_rate: bool = False  # исполнитель получает 100% суммы работы
     status: OrderItemStatus = OrderItemStatus.pending
 
 
@@ -201,6 +207,8 @@ class OrderItemUpdate(BaseModel):
     employee_id: Optional[int] = None
     service_id: Optional[int] = None
     price: Optional[float] = None
+    discount: Optional[float] = OptionalDiscount
+    full_rate: Optional[bool] = None
     status: Optional[OrderItemStatus] = None
 
 
@@ -213,6 +221,7 @@ class ServiceRefShort(BaseModel):
 class OrderItemOut(OrderItemBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    amount: float = 0.0  # сумма со скидкой
     completed_at: Optional[datetime] = None
     employee: Optional[EmployeeShort] = None
     service: Optional[ServiceRefShort] = None
@@ -322,6 +331,7 @@ class OrderPartBase(BaseModel):
     article: Optional[str] = None
     qty: float = 1.0
     price: float = 0.0
+    discount: float = Discount
 
 
 class OrderPartCreate(OrderPartBase):
@@ -333,16 +343,14 @@ class OrderPartUpdate(BaseModel):
     article: Optional[str] = None
     qty: Optional[float] = None
     price: Optional[float] = None
+    discount: Optional[float] = OptionalDiscount
 
 
 class OrderPartOut(OrderPartBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     order_id: int
-
-    @property
-    def total(self) -> float:
-        return round(self.qty * self.price, 2)
+    amount: float = 0.0  # цена × количество со скидкой
 
 
 # ─── Order Comments (Комментарии / Дефектовка) ────────────────────────────────
@@ -387,6 +395,12 @@ class OrderListItem(BaseModel):
     mileage: Optional[int] = None
     client: Optional[ClientShort] = None
     vehicle: Optional[VehicleShort] = None
+
+
+class BulkDiscount(BaseModel):
+    """Одна скидка сразу на все работы или на все запчасти заказа."""
+    target: str  # "items" | "parts"
+    discount: float = Discount
 
 
 class RecalculatePricesOut(BaseModel):

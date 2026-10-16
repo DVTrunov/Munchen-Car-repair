@@ -55,6 +55,7 @@ PLACEHOLDERS = [
     {"key": "{{services_total}}",   "description": "Сумма работ (₸)"},
     {"key": "{{parts_total}}",      "description": "Сумма запчастей (₸)"},
     {"key": "{{total_amount}}",     "description": "Итоговая сумма (₸)"},
+    {"key": "{{discount_total}}",   "description": "Сумма скидки (₸); строка таблицы с ним скрывается, если скидки нет"},
     {"key": "{{table_services}}",   "description": "Таблица выполненных работ (вставляется автоматически)"},
     {"key": "{{table_parts}}",      "description": "Таблица запчастей и материалов (вставляется автоматически)"},
 ]
@@ -185,8 +186,13 @@ def generate_order_doc(
                 tcPr.append(vAlign)
 
     # ─── Prepare data ─────────────────────────────────────────────────────────
-    services_total = round(sum(item.price for item in items), 2)
-    parts_total = round(sum(p.price * p.qty for p in order.parts), 2)
+    services_total = round(sum(item.amount for item in items), 2)
+    parts_total = round(sum(p.amount for p in order.parts), 2)
+    discount_total = round(
+        sum(i.price - i.amount for i in items)
+        + (0 if access.is_scoped else sum(p.price * p.qty - p.amount for p in order.parts)),
+        2,
+    )
     total_amount = services_total if access.is_scoped else round(services_total + parts_total, 2)
 
     # Gather comments from order.comment and chat order.comments
@@ -232,6 +238,7 @@ def generate_order_doc(
         "{{services_total}}":   f"{services_total:,.0f} ₸".replace(',', ' '),
         "{{parts_total}}":      f"{parts_total:,.0f} ₸".replace(',', ' '),
         "{{total_amount}}":     f"{total_amount:,.0f} ₸".replace(',', ' '),
+        "{{discount_total}}":   f"{discount_total:,.0f} ₸".replace(',', ' '),
     }
 
     doc = Document(TEMPLATE_FILE)
@@ -268,21 +275,30 @@ def generate_order_doc(
         parent = tbl_para.getparent()
         idx = list(parent).index(tbl_para)
 
-        table = doc.add_table(rows=1, cols=4)
+        # Колонки «Скидка» и «Сумма» нужны, только если хоть у одной работы есть скидка
+        with_discount = any(i.discount for i in items)
+        headers = ["Наименование работы", "Исполнитель", "Цена (₸)"]
+        if with_discount:
+            headers += ["Скидка", "Сумма (₸)"]
+        headers.append("Статус")
+        table = doc.add_table(rows=1, cols=len(headers))
 
         hdr = table.rows[0].cells
-        hdr[0].text = "Наименование работы"
-        hdr[1].text = "Исполнитель"
-        hdr[2].text = "Цена (₸)"
-        hdr[3].text = "Статус"
+        for cell, title in zip(hdr, headers):
+            cell.text = title
 
+        status_map = {"pending": "Ожидает", "in_progress": "В работе", "done": "Выполнено"}
         for item in items:
-            row = table.add_row().cells
-            row[0].text = item.work_name
-            row[1].text = item.employee.full_name if item.employee else "—"
-            row[2].text = f"{item.price:,.0f}"
-            status_map = {"pending": "Ожидает", "in_progress": "В работе", "done": "Выполнено"}
-            row[3].text = status_map.get(item.status.value, item.status.value)
+            values = [
+                item.work_name,
+                item.employee.full_name if item.employee else "—",
+                money(item.price),
+            ]
+            if with_discount:
+                values += [percent(item.discount), money(item.amount)]
+            values.append(status_map.get(item.status.value, item.status.value))
+            for cell, value in zip(table.add_row().cells, values):
+                cell.text = value
 
         apply_table_style(table)
 
@@ -299,20 +315,24 @@ def generate_order_doc(
         parent = tbl_para.getparent()
         idx = list(parent).index(tbl_para)
 
-        table = doc.add_table(rows=1, cols=4)
+        with_discount = any(p.discount for p in order.parts)
+        headers = ["Наименование", "Кол-во", "Цена (₸)"]
+        if with_discount:
+            headers.append("Скидка")
+        headers.append("Сумма (₸)")
+        table = doc.add_table(rows=1, cols=len(headers))
 
         hdr = table.rows[0].cells
-        hdr[0].text = "Наименование"
-        hdr[1].text = "Кол-во"
-        hdr[2].text = "Цена (₸)"
-        hdr[3].text = "Сумма (₸)"
+        for cell, title in zip(hdr, headers):
+            cell.text = title
 
         for part in order.parts:
-            row = table.add_row().cells
-            row[0].text = part.name
-            row[1].text = str(part.qty).rstrip("0").rstrip(".")
-            row[2].text = f"{part.price:,.0f}".replace(",", " ")
-            row[3].text = f"{part.price * part.qty:,.0f}".replace(",", " ")
+            values = [part.name, str(part.qty).rstrip("0").rstrip("."), money(part.price)]
+            if with_discount:
+                values.append(percent(part.discount))
+            values.append(money(part.amount))
+            for cell, value in zip(table.add_row().cells, values):
+                cell.text = value
 
         apply_table_style(table)
 
@@ -320,6 +340,12 @@ def generate_order_doc(
         parent.remove(tbl_elem)
         parent.insert(idx, tbl_elem)
         parent.remove(tbl_para)
+
+    def money(value):
+        return f"{value:,.0f}".replace(",", " ")
+
+    def percent(value):
+        return f"{value:g}%" if value else "—"
 
     def insert_logo(para):
         """Заменяет абзац с {{company_logo}} картинкой логотипа (или убирает плейсхолдер)."""
@@ -345,6 +371,13 @@ def generate_order_doc(
     # Process body paragraphs
     for para in list(doc.paragraphs):
         process_paragraph(para)
+
+    # Строку «скидка» в таблицах шаблона убираем, если скидки нет
+    if not discount_total:
+        for table in doc.tables:
+            for row in list(table.rows):
+                if any("{{discount_total}}" in c.text for c in row.cells):
+                    row._tr.getparent().remove(row._tr)
 
     # Process tables (existing tables in template)
     for table in doc.tables:

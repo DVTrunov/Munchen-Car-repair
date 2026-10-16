@@ -92,6 +92,23 @@ def seed_database() -> None:
     except Exception as e:
         logger.warning(f"Миграция completed_at: {e}")
 
+    # Скидки и «100% механику» для существующих баз
+    for table, column, ddl in (
+        ("order_items", "discount", "FLOAT NOT NULL DEFAULT 0"),
+        ("order_items", "full_rate", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("order_parts", "discount", "FLOAT NOT NULL DEFAULT 0"),
+    ):
+        try:
+            from sqlalchemy import inspect, text
+            cols = [c["name"] for c in inspect(engine).get_columns(table)]
+            if column not in cols:
+                with engine.connect() as conn:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+                    conn.commit()
+                logger.info(f"Добавлена колонка {column} в таблицу {table}")
+        except Exception as e:
+            logger.warning(f"Миграция {table}.{column}: {e}")
+
     db = SessionLocal()
     try:
         # Первый владелец создаётся только если в базе ещё нет ни одного пользователя.

@@ -678,18 +678,26 @@ function renderOrder(order) {
     `;
 }
 
+function discountCell(discount) {
+    return `<td class="text-right">${discount ? `${+discount}%` : '—'}</td>`;
+}
+
 function renderServicesTable(items) {
     if (!items || items.length === 0) return '<div class="empty-state">Нет позиций</div>';
+    // Колонки «Цена» и «Скидка» показываем, только если хоть у одной работы есть скидка
+    const withDiscount = items.some(it => it.discount);
     const rows = items.map(it => `
         <tr>
             <td>${escapeHtml(it.work_name)}</td>
             <td>${it.employee ? escapeHtml(it.employee.full_name) : '—'}</td>
-            <td class="text-right">${formatMoney(it.price)}</td>
+            ${withDiscount ? `<td class="text-right">${formatMoney(it.price)}</td>${discountCell(it.discount)}` : ''}
+            <td class="text-right">${formatMoney(it.amount)}</td>
             <td class="text-center">${itemStatusBadge(it.status)}</td>
         </tr>`).join('');
     return `<div class="table-wrap"><table class="data-table">
         <thead><tr>
             <th>Наименование</th><th>Исполнитель</th>
+            ${withDiscount ? '<th class="text-right">Цена</th><th class="text-right">Скидка</th>' : ''}
             <th class="text-right">Сумма</th><th class="text-center">Статус</th>
         </tr></thead>
         <tbody>${rows}</tbody>
@@ -698,18 +706,21 @@ function renderServicesTable(items) {
 
 function renderPartsTable(parts) {
     if (!parts || parts.length === 0) return '<div class="empty-state">Нет позиций</div>';
+    const withDiscount = parts.some(p => p.discount);
     const rows = parts.map(p => `
         <tr>
             <td>${escapeHtml(p.name)}</td>
             <td class="text-right">${p.qty}</td>
             <td class="text-right">${formatMoney(p.price)}</td>
-            <td class="text-right">${formatMoney(p.qty * p.price)}</td>
+            ${withDiscount ? discountCell(p.discount) : ''}
+            <td class="text-right">${formatMoney(p.amount)}</td>
         </tr>`).join('');
     return `<div class="table-wrap"><table class="data-table">
         <thead><tr>
             <th>Наименование</th>
             <th class="text-right">Кол-во</th>
             <th class="text-right">Цена</th>
+            ${withDiscount ? '<th class="text-right">Скидка</th>' : ''}
             <th class="text-right">Сумма</th>
         </tr></thead>
         <tbody>${rows}</tbody>

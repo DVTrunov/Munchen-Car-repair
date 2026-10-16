@@ -49,6 +49,11 @@ class RateType(str, enum.Enum):
     percent = "percent"
 
 
+def apply_discount(amount: float, discount: Optional[float]) -> float:
+    """Сумма после скидки в процентах (0 или None — без скидки)."""
+    return round(amount * (1 - (discount or 0) / 100), 2)
+
+
 # ─── Models ──────────────────────────────────────────────────────────────────
 
 class User(Base):
@@ -107,6 +112,22 @@ class Employee(Base):
     def username(self) -> Optional[str]:
         return self.user.username if self.user else None
 
+    def earning_for(self, item: "OrderItem") -> Optional[float]:
+        """Заработок за работу: 100% суммы при отметке full_rate, иначе процент ставки.
+        Для фиксированной ставки без full_rate отдельного заработка нет (None)."""
+        if item.full_rate:
+            return item.amount
+        if self.rate_type == RateType.percent:
+            return round(item.amount * self.rate_value / 100, 2)
+        return None
+
+    def salary_for(self, items) -> float:
+        """Сколько получит сотрудник за набор работ.
+        Процент — сумма заработков; фикс. ставка — оклад плюс работы, отданные на 100%."""
+        if self.rate_type == RateType.percent:
+            return round(sum(self.earning_for(i) for i in items), 2)
+        return round(self.rate_value + sum(i.amount for i in items if i.full_rate), 2)
+
 
 class Order(Base):
     __tablename__ = "orders"
@@ -145,12 +166,19 @@ class OrderItem(Base):
     employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
     service_id = Column(Integer, ForeignKey("services.id"), nullable=True)  # если позиция создана из справочника — можно пересчитать цену
     price = Column(Float, nullable=False, default=0.0)
+    discount = Column(Float, nullable=False, default=0.0)  # скидка в процентах
+    full_rate = Column(Boolean, nullable=False, default=False)  # исполнитель получает 100% суммы работы
     status = Column(SAEnum(OrderItemStatus), default=OrderItemStatus.pending, nullable=False)
     completed_at = Column(DateTime, nullable=True)  # когда работа переведена в «Выполнено» — для отчёта по выработке
 
     order = relationship("Order", back_populates="items")
     employee = relationship("Employee", back_populates="order_items")
     service = relationship("Service")
+
+    @property
+    def amount(self) -> float:
+        """Сумма работы с учётом скидки."""
+        return apply_discount(self.price, self.discount)
 
 
 class StatusHistory(Base):
@@ -231,8 +259,14 @@ class OrderPart(Base):
     article = Column(String(100), nullable=True)     # Артикул
     qty = Column(Float, nullable=False, default=1.0)  # Количество
     price = Column(Float, nullable=False, default=0.0) # Цена за единицу
+    discount = Column(Float, nullable=False, default=0.0)  # скидка в процентах
 
     order = relationship("Order", back_populates="parts")
+
+    @property
+    def amount(self) -> float:
+        """Сумма позиции (цена × количество) с учётом скидки."""
+        return apply_discount(self.price * self.qty, self.discount)
 
 
 # ─── Order Comments (Комментарии / Дефектовка) ───────────────────────────────
