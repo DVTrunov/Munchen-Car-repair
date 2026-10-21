@@ -92,13 +92,20 @@ def seed_database() -> None:
     except Exception as e:
         logger.warning(f"Миграция completed_at: {e}")
 
-    # Скидки, «100% механику» и особенности цен для существующих баз
+    # Скидки, «100% механику», особенности цен и дефектовка для существующих баз
     for table, column, ddl in (
         ("order_items", "discount", "FLOAT NOT NULL DEFAULT 0"),
         ("order_items", "full_rate", "BOOLEAN NOT NULL DEFAULT 0"),
         ("order_parts", "discount", "FLOAT NOT NULL DEFAULT 0"),
         ("service_prices", "variant", "VARCHAR(100)"),
         ("order_items", "price_variant", "VARCHAR(100)"),
+        ("order_items", "is_defect", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("order_items", "approval", "VARCHAR(20) NOT NULL DEFAULT 'approved'"),
+        ("order_items", "defect_note", "TEXT"),
+        ("order_items", "urgency", "VARCHAR(20)"),
+        ("order_parts", "item_id", "INTEGER REFERENCES order_items(id)"),
+        ("order_parts", "approval", "VARCHAR(20) NOT NULL DEFAULT 'approved'"),
+        ("orders", "complaint", "TEXT"),
     ):
         try:
             from sqlalchemy import inspect, text

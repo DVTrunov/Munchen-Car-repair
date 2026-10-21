@@ -32,6 +32,16 @@ class OrderStatus(str, enum.Enum):
     paid = "paid"
 
 
+# Согласование позиции с клиентом (дефектовка). В суммы, документы и зарплату
+# идут только согласованные позиции.
+APPROVAL_PROPOSED = "proposed"   # предложено по итогам дефектовки, ждёт решения клиента
+APPROVAL_APPROVED = "approved"   # согласовано (или добавлено сразу как работа)
+APPROVAL_DECLINED = "declined"   # клиент отказался — уходит в «Рекомендации»
+APPROVALS = (APPROVAL_PROPOSED, APPROVAL_APPROVED, APPROVAL_DECLINED)
+
+URGENCIES = ("urgent", "recommended", "later")  # срочно / рекомендуется / можно позже
+
+
 class OrderItemStatus(str, enum.Enum):
     pending = "pending"
     in_progress = "in_progress"
@@ -141,6 +151,7 @@ class Order(Base):
     total_amount = Column(Float, default=0.0, nullable=False)
     comment = Column(Text, nullable=True)
     mileage = Column(Integer, nullable=True)  # Пробег автомобиля на момент обслуживания
+    complaint = Column(Text, nullable=True)  # жалоба клиента / причина обращения
     sharing_token = Column(String(36), nullable=True, unique=True, index=True)  # UUID for public share link
 
     vehicle = relationship("Vehicle", back_populates="orders")
@@ -155,6 +166,20 @@ class Order(Base):
         "StatusHistory", back_populates="order", cascade="all, delete-orphan",
         order_by="StatusHistory.changed_at"
     )
+
+    @property
+    def approved_items(self):
+        """Работы, которые идут в заказ-наряд и в суммы (без дефектовки на согласовании и отказов)."""
+        return [i for i in self.items if i.is_approved]
+
+    @property
+    def approved_parts(self):
+        return [p for p in self.parts if p.is_approved]
+
+    @property
+    def declined_items(self):
+        """Отказы клиента — показываются в блоке «Рекомендации»."""
+        return [i for i in self.items if i.approval == APPROVAL_DECLINED]
 
 
 class OrderItem(Base):
@@ -171,15 +196,25 @@ class OrderItem(Base):
     full_rate = Column(Boolean, nullable=False, default=False)  # исполнитель получает 100% суммы работы
     status = Column(SAEnum(OrderItemStatus), default=OrderItemStatus.pending, nullable=False)
     completed_at = Column(DateTime, nullable=True)  # когда работа переведена в «Выполнено» — для отчёта по выработке
+    # Дефектовка
+    is_defect = Column(Boolean, nullable=False, default=False)  # позиция из дефектовки (вкладка «Дефектовка»)
+    approval = Column(String(20), nullable=False, default=APPROVAL_APPROVED)
+    defect_note = Column(Text, nullable=True)   # что найдено при осмотре
+    urgency = Column(String(20), nullable=True)  # см. URGENCIES
 
     order = relationship("Order", back_populates="items")
     employee = relationship("Employee", back_populates="order_items")
     service = relationship("Service")
+    parts = relationship("OrderPart", back_populates="item")
 
     @property
     def amount(self) -> float:
         """Сумма работы с учётом скидки."""
         return apply_discount(self.price, self.discount)
+
+    @property
+    def is_approved(self) -> bool:
+        return self.approval == APPROVAL_APPROVED
 
 
 class StatusHistory(Base):
@@ -262,13 +297,20 @@ class OrderPart(Base):
     qty = Column(Float, nullable=False, default=1.0)  # Количество
     price = Column(Float, nullable=False, default=0.0) # Цена за единицу
     discount = Column(Float, nullable=False, default=0.0)  # скидка в процентах
+    item_id = Column(Integer, ForeignKey("order_items.id", ondelete="SET NULL"), nullable=True)  # для какой работы
+    approval = Column(String(20), nullable=False, default=APPROVAL_APPROVED)
 
     order = relationship("Order", back_populates="parts")
+    item = relationship("OrderItem", back_populates="parts")
 
     @property
     def amount(self) -> float:
         """Сумма позиции (цена × количество) с учётом скидки."""
         return apply_discount(self.price * self.qty, self.discount)
+
+    @property
+    def is_approved(self) -> bool:
+        return self.approval == APPROVAL_APPROVED
 
 
 # ─── Order Comments (Комментарии / Дефектовка) ───────────────────────────────

@@ -31,8 +31,8 @@ def _get_order_by_token(token: str, db: Session) -> models.Order:
 
 
 def _order_to_out(order: models.Order) -> schemas.OrderOut:
-    services_total = round(sum(item.amount for item in order.items), 2)
-    parts_total = round(sum(p.amount for p in order.parts), 2)
+    services_total = round(sum(item.amount for item in order.approved_items), 2)
+    parts_total = round(sum(p.amount for p in order.approved_parts), 2)
     data = schemas.OrderOut.model_validate(order)
     data.services_total = services_total
     data.parts_total = parts_total

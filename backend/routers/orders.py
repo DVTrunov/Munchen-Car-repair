@@ -31,9 +31,10 @@ os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 
 def _recalc_total(order: models.Order) -> None:
-    """Recalculate and save order total_amount from items + parts."""
-    services_total = sum(item.amount for item in order.items)
-    parts_total = sum(part.amount for part in order.parts)
+    """Recalculate and save order total_amount from approved items + parts
+    (дефектовка на согласовании и отказы клиента в сумму не входят)."""
+    services_total = sum(item.amount for item in order.approved_items)
+    parts_total = sum(part.amount for part in order.approved_parts)
     order.total_amount = round(services_total + parts_total, 2)
 
 
@@ -54,8 +55,8 @@ def _order_to_out(order: models.Order, access: OrderAccess) -> schemas.OrderOut:
     а суммы считаются только по ним.
     """
     items = access.visible_items(order)
-    services_total = round(sum(item.amount for item in items), 2)
-    parts_total = round(sum(p.amount for p in order.parts), 2)
+    services_total = round(sum(item.amount for item in items if item.is_approved), 2)
+    parts_total = round(sum(p.amount for p in order.approved_parts), 2)
 
     data = schemas.OrderOut.model_validate(order)
     data.services_total = services_total
@@ -103,6 +104,31 @@ def _sync_completed_at(item: models.OrderItem) -> None:
         item.completed_at = None
 
 
+def _sync_approval(item: models.OrderItem) -> None:
+    """Решение клиента по работе распространяется на её запчасти; несогласованная
+    работа не может быть «в работе» или «выполнена»."""
+    if item.approval not in models.APPROVALS:
+        raise HTTPException(status_code=422, detail="Неизвестный статус согласования")
+    for part in item.parts:
+        part.approval = item.approval
+    if not item.is_approved:
+        item.status = models.OrderItemStatus.pending
+
+
+def _link_part(db: Session, order_id: int, part: models.OrderPart) -> None:
+    """Запчасть, привязанная к работе, наследует её согласование."""
+    if part.item_id is None:
+        return
+    item = (
+        db.query(models.OrderItem)
+        .filter(models.OrderItem.id == part.item_id, models.OrderItem.order_id == order_id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(status_code=422, detail="Работа для запчасти не найдена в этом заказе")
+    part.approval = item.approval
+
+
 def _check_item_employee(access: OrderAccess, employee_id: Optional[int]) -> None:
     """Пользователь с ограниченной видимостью может назначать работы только на себя."""
     if access.is_scoped and employee_id != access.employee_id:
@@ -113,11 +139,14 @@ def _check_pricing_change(access: OrderAccess, current, changes: dict) -> None:
     """Скидки и «100% механику» меняют деньги — роли «только свои работы» это запрещено."""
     if not access.is_scoped:
         return
-    for field, default in (("discount", 0), ("full_rate", False)):
+    for field, default in (("discount", 0), ("full_rate", False), ("approval", models.APPROVAL_APPROVED)):
         if field in changes:
             before = getattr(current, field) if current is not None else default
             if (changes[field] or default) != (before or default):
-                raise HTTPException(status_code=403, detail="Скидки и оплату 100% может менять только менеджер или владелец")
+                raise HTTPException(
+                    status_code=403,
+                    detail="Скидки, оплату 100% и согласование с клиентом меняет только менеджер или владелец",
+                )
 
 
 # ─── Orders ──────────────────────────────────────────────────────────────────
@@ -154,7 +183,7 @@ def list_orders(
     result = []
     for order in orders:
         row = schemas.OrderListItem.model_validate(order)
-        row.total_amount = round(sum(i.amount for i in access.visible_items(order)), 2)
+        row.total_amount = round(sum(i.amount for i in access.visible_items(order) if i.is_approved), 2)
         result.append(row)
     return result
 
@@ -259,9 +288,16 @@ def add_order_item(
 ):
     order = _get_order(db, order_id, access)
     _check_item_employee(access, data.employee_id)
-    _check_pricing_change(access, None, data.model_dump())
+    values = data.model_dump()
+    if access.is_scoped:
+        # Всё, что добавляет механик, — дефектовка: работа ждёт согласования с клиентом
+        values.update(is_defect=True, approval=models.APPROVAL_PROPOSED)
+    elif not values["is_defect"]:
+        values["approval"] = models.APPROVAL_APPROVED  # обычная работа сразу в заказ-наряде
+    _check_pricing_change(access, None, {k: values[k] for k in ("discount", "full_rate")})
 
-    item = models.OrderItem(order_id=order_id, **data.model_dump())
+    item = models.OrderItem(order_id=order_id, **values)
+    _sync_approval(item)
     _sync_completed_at(item)
     db.add(item)
     db.flush()
@@ -285,8 +321,13 @@ def update_order_item(
         _check_item_employee(access, updates["employee_id"])
     _check_pricing_change(access, item, updates)
 
+    if "status" in updates and updates["status"] != models.OrderItemStatus.pending:
+        if updates.get("approval", item.approval) != models.APPROVAL_APPROVED:
+            raise HTTPException(status_code=422, detail="Сначала согласуйте работу с клиентом")
+
     for key, value in updates.items():
         setattr(item, key, value)
+    _sync_approval(item)
     _sync_completed_at(item)
 
     db.flush()
@@ -306,6 +347,12 @@ def delete_order_item(
     item = _get_item(db, order_id, item_id, access)
 
     order = item.order
+    # Запчасти этой работы: несогласованные удаляем вместе с ней, согласованные оставляем
+    for part in list(item.parts):
+        if part.is_approved:
+            part.item_id = None
+        else:
+            db.delete(part)
     db.delete(item)
     db.flush()
     _recalc_total(order)
@@ -335,6 +382,7 @@ def add_part(
     _check_pricing_change(access, None, data.model_dump())
 
     part = models.OrderPart(order_id=order_id, **data.model_dump())
+    _link_part(db, order_id, part)
     db.add(part)
     db.flush()
     _recalc_total(order)
@@ -364,6 +412,7 @@ def update_part(
     _check_pricing_change(access, part, updates)
     for key, value in updates.items():
         setattr(part, key, value)
+    _link_part(db, order_id, part)
 
     db.flush()
     _recalc_total(part.order)
@@ -461,6 +510,32 @@ def delete_comment(
 
     db.delete(comment)
     db.commit()
+
+
+# ─── Дефектовка: решение клиента по всем предложенным позициям ──────────────
+
+@router.post("/{order_id}/approval", response_model=schemas.OrderOut)
+def apply_bulk_approval(
+    order_id: int,
+    data: schemas.BulkApproval,
+    db: Session = Depends(get_db),
+    access: OrderAccess = Depends(get_order_access),
+):
+    """«Согласовать всё» / «Отказ от остального» — для позиций дефектовки, ждущих решения."""
+    access.require_full_access()
+    order = _get_order(db, order_id, access)
+    for item in order.items:
+        if item.approval == models.APPROVAL_PROPOSED:
+            item.approval = data.approval
+            _sync_approval(item)
+    for part in order.parts:
+        if part.item_id is None and part.approval == models.APPROVAL_PROPOSED:
+            part.approval = data.approval
+    db.flush()
+    _recalc_total(order)
+    db.commit()
+    db.refresh(order)
+    return _order_to_out(order, access)
 
 
 # ─── Скидка на все позиции ─────────────────────────────────────────────────

@@ -194,6 +194,14 @@ function _renderHistoryOrderCard(order, idx, total) {
       </div>`
     : '';
 
+  // Отказы клиента при дефектовке — повод снова предложить работу на следующем визите
+  const recommendationsHtml = (order.recommendations || []).length > 0
+    ? `<div style="margin-top:8px;padding:8px 12px;background:rgba(245,158,11,.08);border-left:3px solid #f59e0b;border-radius:0 4px 4px 0">
+        <div class="text-sm" style="color:#f59e0b;margin-bottom:4px;font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:.5px">Рекомендовано, клиент отказался</div>
+        <div style="font-size:13px">${order.recommendations.map(r => App.escHtml(r)).join(', ')}</div>
+      </div>`
+    : '';
+
   const commentHtml = order.comment
     ? `<div style="margin-top:8px;padding:8px 12px;background:rgba(255,255,255,.04);border-left:3px solid rgba(245,158,11,.4);border-radius:0 4px 4px 0;font-size:12px;color:var(--text-muted);font-style:italic">
         ${App.escHtml(order.comment)}
@@ -237,6 +245,7 @@ function _renderHistoryOrderCard(order, idx, total) {
 
         ${worksHtml}
         ${partsHtml}
+        ${recommendationsHtml}
         ${commentHtml}
       </div>
     </div>

@@ -60,7 +60,7 @@ def get_summary(
         emp_items = [
             item
             for order in orders
-            for item in order.items
+            for item in order.approved_items
             if item.employee_id == emp.id
         ]
         emp_total = round(sum(item.amount for item in emp_items), 2)

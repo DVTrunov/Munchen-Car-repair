@@ -42,6 +42,7 @@ class ServiceHistoryItem(BaseModel):
     status: str
     works: List[str]
     parts: List[str]
+    recommendations: List[str] = []  # от чего клиент отказался при дефектовке
     services_total: float
     parts_total: float
     total_amount: float
@@ -88,13 +89,14 @@ def get_vehicle_history(
     total_spent = 0.0
 
     for order in orders:
-        services_total = round(sum(item.amount for item in order.items), 2)
-        parts_total = round(sum(p.amount for p in order.parts), 2)
+        services_total = round(sum(item.amount for item in order.approved_items), 2)
+        parts_total = round(sum(p.amount for p in order.approved_parts), 2)
         total = round(services_total + parts_total, 2)
         total_spent += total
 
-        works = [item.work_name for item in order.items]
-        parts = [part.name for part in order.parts]
+        works = [item.work_name for item in order.approved_items]
+        parts = [part.name for part in order.approved_parts]
+        recommendations = [item.work_name for item in order.declined_items]
 
         history_items.append(ServiceHistoryItem(
             order_id=order.id,
@@ -106,6 +108,7 @@ def get_vehicle_history(
             services_total=services_total,
             parts_total=parts_total,
             total_amount=total,
+            recommendations=recommendations,
             comment=order.comment,
         ))
 
@@ -270,7 +273,7 @@ def export_vehicle_history(
 
     # ─── Summary stats ────────────────────────────────────────────────────────
     total_spent = sum(
-        round(sum(i.amount for i in o.items) + sum(p.amount for p in o.parts), 2)
+        round(sum(i.amount for i in o.approved_items) + sum(p.amount for p in o.approved_parts), 2)
         for o in orders
     )
     add_styled_para("СТАТИСТИКА", size=8, bold=True, color=(0x88, 0x88, 0x99), space_after=4)
@@ -305,8 +308,8 @@ def export_vehicle_history(
         add_styled_para("Заказ-нарядов по этому автомобилю не найдено.", size=10, color=(0x88, 0x88, 0x99))
     else:
         for order in reversed(orders):  # newest first
-            services_total = round(sum(item.amount for item in order.items), 2)
-            parts_total = round(sum(p.amount for p in order.parts), 2)
+            services_total = round(sum(item.amount for item in order.approved_items), 2)
+            parts_total = round(sum(p.amount for p in order.approved_parts), 2)
             total = round(services_total + parts_total, 2)
 
             # ── Order header ──
@@ -344,7 +347,7 @@ def export_vehicle_history(
             set_cell_padding(cell_total, top=80, bottom=80, left=60, right=120)
 
             # ── Works table ──
-            if order.items:
+            if order.approved_items:
                 works_table = doc.add_table(rows=1, cols=3)
                 hdr = works_table.rows[0].cells
                 for i, (cell, text) in enumerate(zip(hdr, ["Наименование работы", "Исполнитель", "Сумма (₸)"])):
@@ -359,7 +362,7 @@ def export_vehicle_history(
                         for p in cell.paragraphs:
                             p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
-                for item in order.items:
+                for item in order.approved_items:
                     row = works_table.add_row()
                     row.cells[0].text = item.work_name
                     row.cells[1].text = item.employee.full_name if item.employee else "—"
@@ -375,7 +378,7 @@ def export_vehicle_history(
                                 p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
             # ── Parts table ──
-            if order.parts:
+            if order.approved_parts:
                 parts_table = doc.add_table(rows=1, cols=3)
                 hdr = parts_table.rows[0].cells
                 for i, (cell, text) in enumerate(zip(hdr, ["Запчасть / Материал", "Кол-во", "Сумма (₸)"])):
@@ -390,7 +393,7 @@ def export_vehicle_history(
                         for p in cell.paragraphs:
                             p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
-                for part in order.parts:
+                for part in order.approved_parts:
                     row = parts_table.add_row()
                     row.cells[0].text = part.name
                     row.cells[1].text = str(part.qty).rstrip("0").rstrip(".")
@@ -404,6 +407,16 @@ def export_vehicle_history(
                         if j == 2:
                             for p in cell.paragraphs:
                                 p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+            # ── Recommendations (отказы клиента) ──
+            if order.declined_items:
+                rec_p = doc.add_paragraph()
+                rec_p.paragraph_format.space_before = Pt(3)
+                rec_p.paragraph_format.space_after = Pt(3)
+                r_lbl = rec_p.add_run("Рекомендовано, клиент отказался: ")
+                set_font(r_lbl, 8, bold=True, color=(0xB0, 0x60, 0x20))
+                r_txt = rec_p.add_run(", ".join(i.work_name for i in order.declined_items))
+                set_font(r_txt, 8, color=(0x44, 0x44, 0x55))
 
             # ── Comment ──
             if order.comment:

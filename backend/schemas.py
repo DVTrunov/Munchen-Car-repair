@@ -6,7 +6,7 @@ All Out schemas use `from_attributes = True` for ORM compatibility.
 """
 import re
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Literal
 from pydantic import BaseModel, field_validator, ConfigDict, Field
 from models import UserRole, OrderStatus, OrderItemStatus, EmployeeRole, RateType
 
@@ -188,6 +188,10 @@ Discount = Field(0.0, ge=0, le=100, description="Скидка в процент�
 OptionalDiscount = Field(None, ge=0, le=100, description="Скидка в процентах")
 
 
+Approval = Literal["proposed", "approved", "declined"]  # согласование с клиентом (дефектовка)
+Urgency = Literal["urgent", "recommended", "later"]     # срочно / рекомендуется / можно позже
+
+
 class OrderItemBase(BaseModel):
     work_name: str
     employee_id: Optional[int] = None
@@ -197,6 +201,10 @@ class OrderItemBase(BaseModel):
     discount: float = Discount
     full_rate: bool = False  # исполнитель получает 100% суммы работы
     status: OrderItemStatus = OrderItemStatus.pending
+    is_defect: bool = False  # позиция из дефектовки
+    approval: Approval = "approved"
+    defect_note: Optional[str] = None  # что найдено при осмотре
+    urgency: Optional[Urgency] = None
 
 
 class OrderItemCreate(OrderItemBase):
@@ -212,6 +220,9 @@ class OrderItemUpdate(BaseModel):
     discount: Optional[float] = OptionalDiscount
     full_rate: Optional[bool] = None
     status: Optional[OrderItemStatus] = None
+    approval: Optional[Approval] = None
+    defect_note: Optional[str] = None
+    urgency: Optional[Urgency] = None
 
 
 class ServiceRefShort(BaseModel):
@@ -313,6 +324,7 @@ class OrderBase(BaseModel):
     client_id: Optional[int] = None
     comment: Optional[str] = None
     mileage: Optional[int] = None  # Пробег на момент обслуживания (км)
+    complaint: Optional[str] = None  # жалоба клиента / причина обращения
 
 
 class OrderCreate(OrderBase):
@@ -324,6 +336,7 @@ class OrderUpdate(BaseModel):
     vehicle_id: Optional[int] = None
     comment: Optional[str] = None
     mileage: Optional[int] = None  # Пробег на момент обслуживания (км)
+    complaint: Optional[str] = None
     status: Optional[OrderStatus] = None
 
 
@@ -335,6 +348,8 @@ class OrderPartBase(BaseModel):
     qty: float = 1.0
     price: float = 0.0
     discount: float = Discount
+    item_id: Optional[int] = None  # для какой работы (дефектовка)
+    approval: Approval = "approved"
 
 
 class OrderPartCreate(OrderPartBase):
@@ -347,6 +362,8 @@ class OrderPartUpdate(BaseModel):
     qty: Optional[float] = None
     price: Optional[float] = None
     discount: Optional[float] = OptionalDiscount
+    item_id: Optional[int] = None
+    approval: Optional[Approval] = None
 
 
 class OrderPartOut(OrderPartBase):
@@ -398,6 +415,11 @@ class OrderListItem(BaseModel):
     mileage: Optional[int] = None
     client: Optional[ClientShort] = None
     vehicle: Optional[VehicleShort] = None
+
+
+class BulkApproval(BaseModel):
+    """Решение клиента сразу по всем позициям дефектовки, ожидающим согласования."""
+    approval: Literal["approved", "declined"]
 
 
 class BulkDiscount(BaseModel):

@@ -2082,3 +2082,82 @@ tbody tr:hover { background: rgba(255,255,255,0.02); }
     padding: 16px 14px 0;
   }
 }
+
+/* ─── Дефектовка ─────────────────────────────────────────────────────────── */
+.defect-list {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.defect-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  padding: 12px 14px;
+}
+
+.defect-card.is-declined {
+  opacity: 0.6;
+}
+
+.defect-card.is-declined .defect-card-title {
+  text-decoration: line-through;
+}
+
+.defect-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.defect-card-title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.defect-card-price {
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.defect-card-parts {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.defect-part-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.defect-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.defect-card-actions:empty {
+  display: none;
+}
+
+.defect-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding-top: 4px;
+}
