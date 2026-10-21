@@ -77,6 +77,7 @@ async function renderOrders() {
     document.getElementById('filter-status').value = '';
     document.getElementById('filter-date-from').value = '';
     document.getElementById('filter-date-to').value = '';
+    App.setQuery({});
     loadOrders({});
   });
 
@@ -118,7 +119,10 @@ function applyOrderFilters() {
   const status = document.getElementById('filter-status').value;
   const date_from = document.getElementById('filter-date-from').value;
   const date_to = document.getElementById('filter-date-to').value;
-  loadOrders({ status, date_from, date_to });
+  const client_id = new URLSearchParams(window.location.hash.split('?')[1] || '').get('client_id') || '';
+  // Фильтры запоминаем в адресе — после «Назад» из заказа список откроется с ними же
+  App.setQuery({ status, date_from, date_to, client_id });
+  loadOrders({ status, date_from, date_to, client_id });
 }
 
 async function loadOrders(filters = {}) {
@@ -251,7 +255,7 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
   App.setContent(`
     <div class="page-header">
       <div>
-        <div class="back-link" onclick="App.navigate('/orders')">
+        <div class="back-link" onclick="App.goBack('/orders')">
           <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path fill-rule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clip-rule="evenodd"/></svg>
           Все заказ-наряды
         </div>

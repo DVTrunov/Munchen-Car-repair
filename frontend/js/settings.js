@@ -31,7 +31,7 @@ function settingsTabsHtml() {
 
 function renderSettings(tabId) {
   const tab = SETTINGS_TABS.find(t => t.id === tabId);
-  if (!tab) return App.navigate('/settings/general');
+  if (!tab) return App.navigate('/settings/general', { replace: true });
   return tab.render();
 }
 
