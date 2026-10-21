@@ -15,7 +15,17 @@ const App = {
     const u = localStorage.getItem('sto_user');
     if (u) this.user = JSON.parse(u);
 
-    window.addEventListener('hashchange', () => this._route());
+    window.addEventListener('hashchange', () => {
+      this._trackHistory();
+      this._route();
+    });
+    this._trackHistory();
+    // Клик по логотипу или названию в меню — к заказ-нарядам
+    document.querySelectorAll('.sidebar-logo, .mobile-brand').forEach(el => {
+      el.style.cursor = 'pointer';
+      el.title = 'К заказ-нарядам';
+      el.addEventListener('click', () => this.navigate('/orders'));
+    });
     document.getElementById('btn-logout').addEventListener('click', () => this.logout());
     document.getElementById('modal-close').addEventListener('click', () => this.closeModal());
     document.getElementById('modal-cancel').addEventListener('click', () => this.closeModal());
@@ -121,6 +131,10 @@ const App = {
 
     // Close mobile sidebar whenever route changes
     this.closeMobileSidebar();
+    // Окна и шторка комментариев относятся к прошлой странице — закрываем их,
+    // иначе после «Назад» они остаются поверх новой страницы
+    this.closeModal();
+    if (typeof closeCommentsDrawer === 'function') closeCommentsDrawer();
 
     if (!this.token) {
       // Not logged in — show login
@@ -173,8 +187,8 @@ const App = {
     }
 
     // Старые адреса разделов, которые теперь живут в «Настройках»
-    if (path === '/roles') return this.navigate('/settings/roles');
-    if (path === '/users') return this.navigate('/settings/users');
+    if (path === '/roles') return this.navigate('/settings/roles', { replace: true });
+    if (path === '/users') return this.navigate('/settings/users', { replace: true });
 
     if (path === '/settings' || path.startsWith('/settings/')) {
       if (this.isOwner()) return renderSettings(path.split('/')[2] || 'general');
@@ -185,8 +199,39 @@ const App = {
     renderOrders();
   },
 
-  navigate(path) {
-    window.location.hash = '#' + path;
+  /** Переход на страницу. replace: true — без новой записи в истории браузера (для переадресаций). */
+  navigate(path, { replace = false } = {}) {
+    if (replace) {
+      this._visited.pop();  // текущая запись заменяется — в истории её больше нет
+      window.location.replace('#' + path);
+    } else {
+      window.location.hash = '#' + path;
+    }
+  },
+
+  // Адреса, пройденные внутри CRM в этой вкладке, — чтобы кнопки «← Назад»
+  // на страницах возвращали туда, откуда пришли, а не добавляли новый шаг в историю
+  _visited: [],
+
+  _trackHistory() {
+    const hash = window.location.hash;
+    const v = this._visited;
+    if (v.length > 1 && v[v.length - 2] === hash) v.pop();       // ушли назад
+    else if (v[v.length - 1] !== hash) v.push(hash);             // новый переход
+  },
+
+  /** Вернуться на предыдущую страницу CRM; если её нет (открыли по ссылке) — на fallback. */
+  goBack(fallback) {
+    if (this._visited.length > 1) history.back();
+    else this.navigate(fallback, { replace: true });
+  },
+
+  /** Обновить параметры адреса (фильтры) без перехода и без новой записи в истории. */
+  setQuery(params) {
+    const path = window.location.hash.slice(1).split('?')[0];
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString();
+    history.replaceState(history.state, '', '#' + path + (qs ? '?' + qs : ''));
+    this._visited[this._visited.length - 1] = window.location.hash;
   },
 
   _showLogin() {
@@ -204,8 +249,9 @@ const App = {
     localStorage.setItem('sto_token', token);
     localStorage.setItem('sto_user', JSON.stringify(user));
     await this._loadSession();
+    // Страницу входа заменяем, чтобы «Назад» не возвращал на неё
     if (window.location.hash === '#/orders') this._route();
-    else this.navigate('/orders');
+    else this.navigate('/orders', { replace: true });
   },
 
   // ─── Branding (название и логотип автосервиса) ────────────────────────────
@@ -259,7 +305,8 @@ const App = {
     this.user = null;
     localStorage.removeItem('sto_token');
     localStorage.removeItem('sto_user');
-    window.location.hash = '#/login';
+    history.replaceState(null, '', '#/login');
+    this._visited = ['#/login'];
     this._showLogin();
   },
 

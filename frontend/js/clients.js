@@ -106,7 +106,7 @@ async function renderClientDetail(id) {
     App.setContent(`
       <div class="page-header">
         <div>
-          <div class="back-link" onclick="App.navigate('/clients')">
+          <div class="back-link" onclick="App.goBack('/clients')">
             <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path fill-rule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clip-rule="evenodd"/></svg>
             Все клиенты
           </div>
@@ -379,6 +379,16 @@ async function deleteClient(id, name) {
 }
 
 async function showNewOrderForClient(clientId) {
-  // Navigate to new order creation with pre-filled client
-  App.navigate(`/orders/new?client_id=${clientId}`);
+  // Создаём заказ-наряд сразу на этого клиента (если у него одна машина — и на неё) и открываем его
+  try {
+    const vehicles = await App.api(`/vehicles/?client_id=${clientId}`).catch(() => []);
+    const order = await App.api('/orders/', {
+      method: 'POST',
+      body: { client_id: clientId, vehicle_id: vehicles?.length === 1 ? vehicles[0].id : null, comment: '' },
+    });
+    App.toast('Новый заказ-наряд создан!');
+    App.navigate(`/orders/${order.id}`);
+  } catch (err) {
+    App.toast(err.message, 'error');
+  }
 }
