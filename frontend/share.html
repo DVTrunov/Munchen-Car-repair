@@ -645,17 +645,21 @@ function renderOrder(order) {
         </div>
     </div>
 
+    ${renderDefectSection(order)}
+
     <!-- Services table -->
     <div class="section-card">
         <div class="section-header">🔧 Работы</div>
-        ${renderServicesTable(order.items)}
+        ${renderServicesTable(order.items.filter(i => i.approval === 'approved'))}
     </div>
 
     <!-- Parts table -->
     <div class="section-card">
         <div class="section-header">🧰 Материалы и запчасти</div>
-        ${renderPartsTable(order.parts)}
+        ${renderPartsTable(order.parts.filter(p => p.approval === 'approved'))}
     </div>
+
+    ${renderRecommendations(order.items.filter(i => i.approval === 'declined'))}
 
     <!-- Status history -->
     <div class="section-card">
@@ -676,6 +680,57 @@ function renderOrder(order) {
         </div>
     </div>
     `;
+}
+
+const URGENCY_LABELS = { urgent: '🔴 Срочно', recommended: '🟡 Рекомендуется', later: '⚪ Можно позже' };
+const APPROVAL_LABELS = { proposed: 'Ждёт вашего решения', approved: '✅ Согласовано', declined: 'Отказ' };
+
+/** Результаты дефектовки: что нашли, срочность и стоимость (работа + запчасти к ней) */
+function renderDefectSection(order) {
+    const items = order.items.filter(i => i.is_defect);
+    if (!items.length && !order.complaint) return '';
+    const partsFor = id => order.parts.filter(p => p.item_id === id);
+    const rows = items.map(it => {
+        const parts = partsFor(it.id);
+        const total = it.amount + parts.reduce((s, p) => s + p.amount, 0);
+        return `
+        <tr style="${it.approval === 'declined' ? 'opacity:.55' : ''}">
+            <td>
+                <div style="font-weight:600">${escapeHtml(it.work_name)}</div>
+                ${it.defect_note ? `<div style="font-size:12px;opacity:.8">${escapeHtml(it.defect_note)}</div>` : ''}
+                ${parts.length ? `<div style="font-size:12px;opacity:.7">Запчасти: ${parts.map(p => escapeHtml(p.name)).join(', ')}</div>` : ''}
+            </td>
+            <td>${URGENCY_LABELS[it.urgency] || '—'}</td>
+            <td class="text-right">${formatMoney(total)}</td>
+            <td class="text-center" style="font-size:12px">${APPROVAL_LABELS[it.approval] || ''}</td>
+        </tr>`;
+    }).join('');
+    return `
+    <div class="section-card">
+        <div class="section-header">🩺 Результаты осмотра</div>
+        ${order.complaint ? `<div class="section-body" style="padding-bottom:0"><strong>Причина обращения:</strong> ${escapeHtml(order.complaint)}</div>` : ''}
+        ${items.length ? `<div class="table-wrap"><table class="data-table">
+            <thead><tr>
+                <th>Что обнаружено и что рекомендуем</th><th>Срочность</th>
+                <th class="text-right">Стоимость</th><th class="text-center">Решение</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table></div>` : ''}
+    </div>`;
+}
+
+/** Работы, от которых клиент отказался, — без сумм, как рекомендация на будущее */
+function renderRecommendations(items) {
+    if (!items.length) return '';
+    return `
+    <div class="section-card">
+        <div class="section-header">💡 Рекомендации</div>
+        <div class="section-body">
+            <ul style="margin:0;padding-left:18px">
+                ${items.map(it => `<li style="margin-bottom:4px">${escapeHtml(it.work_name)}${it.defect_note ? ` — <span style="opacity:.75">${escapeHtml(it.defect_note)}</span>` : ''}${URGENCY_LABELS[it.urgency] ? ` <span style="font-size:12px">(${URGENCY_LABELS[it.urgency]})</span>` : ''}</li>`).join('')}
+            </ul>
+        </div>
+    </div>`;
 }
 
 function discountCell(discount) {

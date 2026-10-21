@@ -44,6 +44,7 @@ PLACEHOLDERS = [
     {"key": "{{order_date}}",       "description": "Дата создания заказа"},
     {"key": "{{order_status}}",     "description": "Статус заказа (на русском)"},
     {"key": "{{comment}}",          "description": "Общий комментарий к заказу"},
+    {"key": "{{complaint}}",        "description": "Жалоба клиента / причина обращения"},
     {"key": "{{client_name}}",      "description": "ФИО клиента"},
     {"key": "{{client_phone}}",     "description": "Телефон клиента"},
     {"key": "{{vehicle_brand}}",    "description": "Марка автомобиля"},
@@ -58,7 +59,14 @@ PLACEHOLDERS = [
     {"key": "{{discount_total}}",   "description": "Сумма скидки (₸); строка таблицы с ним скрывается, если скидки нет"},
     {"key": "{{table_services}}",   "description": "Таблица выполненных работ (вставляется автоматически)"},
     {"key": "{{table_parts}}",      "description": "Таблица запчастей и материалов (вставляется автоматически)"},
+    {"key": "{{table_recommendations}}", "description": "Рекомендации — работы, от которых клиент отказался (без сумм); скрывается вместе с заголовком, если отказов нет"},
 ]
+
+URGENCY_LABELS = {
+    "urgent": "Срочно",
+    "recommended": "Рекомендуется",
+    "later": "Можно позже",
+}
 
 STATUS_LABELS = {
     "new": "Новый",
@@ -113,8 +121,12 @@ def generate_order_doc(
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order or not access.can_see_order(order):
         raise HTTPException(status_code=404, detail="Заказ-наряд не найден")
-    # Механик с ограниченной видимостью печатает только свои работы
-    items = access.visible_items(order)
+    # Механик с ограниченной видимостью печатает только свои работы.
+    # В заказ-наряд идут только согласованные позиции, отказы — в «Рекомендации».
+    visible = access.visible_items(order)
+    items = [i for i in visible if i.is_approved]
+    declined = [i for i in visible if i.approval == models.APPROVAL_DECLINED]
+    parts = order.approved_parts
 
     try:
         from docx import Document
@@ -187,10 +199,10 @@ def generate_order_doc(
 
     # ─── Prepare data ─────────────────────────────────────────────────────────
     services_total = round(sum(item.amount for item in items), 2)
-    parts_total = round(sum(p.amount for p in order.parts), 2)
+    parts_total = round(sum(p.amount for p in parts), 2)
     discount_total = round(
         sum(i.price - i.amount for i in items)
-        + (0 if access.is_scoped else sum(p.price * p.qty - p.amount for p in order.parts)),
+        + (0 if access.is_scoped else sum(p.price * p.qty - p.amount for p in parts)),
         2,
     )
     total_amount = services_total if access.is_scoped else round(services_total + parts_total, 2)
@@ -224,6 +236,7 @@ def generate_order_doc(
         "{{order_date}}":       order.created_at.strftime("%d.%m.%Y"),
         "{{order_status}}":     STATUS_LABELS.get(order.status.value, order.status.value),
         "{{comment}}":          comments_str,
+        "{{complaint}}":        order.complaint or "—",
         "{{client_name}}":      order.client.full_name if order.client else "—",
         "{{client_phone}}":     order.client.phone if order.client else "—",
         "{{vehicle_brand}}":    order.vehicle.brand if order.vehicle else "—",
@@ -315,7 +328,7 @@ def generate_order_doc(
         parent = tbl_para.getparent()
         idx = list(parent).index(tbl_para)
 
-        with_discount = any(p.discount for p in order.parts)
+        with_discount = any(p.discount for p in parts)
         headers = ["Наименование", "Кол-во", "Цена (₸)"]
         if with_discount:
             headers.append("Скидка")
@@ -326,7 +339,7 @@ def generate_order_doc(
         for cell, title in zip(hdr, headers):
             cell.text = title
 
-        for part in order.parts:
+        for part in parts:
             values = [part.name, str(part.qty).rstrip("0").rstrip("."), money(part.price)]
             if with_discount:
                 values.append(percent(part.discount))
@@ -356,10 +369,38 @@ def generate_order_doc(
         if path:
             (para.runs[0] if para.runs else para.add_run()).add_picture(path, height=Cm(2))
 
+    def insert_recommendations(para):
+        """{{table_recommendations}} — таблица отказов без сумм; если отказов нет,
+        убираем абзац и заголовок «РЕКОМЕНДАЦИИ» над ним."""
+        tbl_para = para._element
+        parent = tbl_para.getparent()
+        if not declined:
+            prev = tbl_para.getprevious()
+            if prev is not None and prev.tag.endswith("}p") and "РЕКОМЕНДАЦИИ" in "".join(prev.itertext()).upper():
+                parent.remove(prev)
+            parent.remove(tbl_para)
+            return
+        idx = list(parent).index(tbl_para)
+        table = doc.add_table(rows=1, cols=3)
+        for cell, title in zip(table.rows[0].cells, ("Рекомендуемая работа", "Что обнаружено", "Срочность")):
+            cell.text = title
+        for item in declined:
+            row = table.add_row().cells
+            row[0].text = item.work_name
+            row[1].text = item.defect_note or "—"
+            row[2].text = URGENCY_LABELS.get(item.urgency, "—")
+        apply_table_style(table)
+        tbl_elem = table._tbl
+        parent.remove(tbl_elem)
+        parent.insert(idx, tbl_elem)
+        parent.remove(tbl_para)
+
     def process_paragraph(para):
         full_text = para.text
         if "{{company_logo}}" in full_text:
             insert_logo(para)
+        elif "{{table_recommendations}}" in full_text:
+            insert_recommendations(para)
         elif "{{table_services}}" in full_text:
             insert_services_table(para)
         elif "{{table_parts}}" in full_text:
@@ -395,4 +436,152 @@ def generate_order_doc(
         out_path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=f"Заказ-наряд_№{order_id}.docx",
+    )
+
+
+# ─── Дефектовочный лист ───────────────────────────────────────────────────────
+
+@router.get("/defect-sheet/{order_id}")
+def generate_defect_sheet(
+    order_id: int,
+    db: Session = Depends(get_db),
+    access: OrderAccess = Depends(get_order_access),
+):
+    """
+    Дефектовочный лист для согласования с клиентом: что найдено, срочность, цены
+    работ и запчастей, отметки «согласен / отказ» и подпись клиента.
+    Формируется без шаблона. Печатает менеджер или владелец.
+    """
+    access.require_full_access()
+    order = db.query(models.Order).filter(models.Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Заказ-наряд не найден")
+    defect_items = [i for i in order.items if i.is_defect]
+    if not defect_items:
+        raise HTTPException(status_code=400, detail="В заказ-наряде нет позиций дефектовки")
+
+    from docx import Document
+    from docx.enum.section import WD_ORIENT
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls
+    from docx.shared import Cm, Pt, RGBColor
+
+    company = load_company(db)
+    doc = Document()
+    section = doc.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width, section.page_height = section.page_height, section.page_width
+    for side in ("left_margin", "right_margin", "top_margin", "bottom_margin"):
+        setattr(section, side, Cm(1.5))
+    doc.styles["Normal"].font.name = "Calibri"
+    doc.styles["Normal"].font.size = Pt(10)
+
+    def money(value):
+        return f"{value:,.0f} ₸".replace(",", " ")
+
+    def para(text, size=10, bold=False, color=None, space_after=4):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(space_after)
+        r = p.add_run(text)
+        r.font.size = Pt(size)
+        r.bold = bold
+        if color:
+            r.font.color.rgb = RGBColor(*color)
+        return p
+
+    def style_table(table, header=True):
+        table.style = "Table Grid"
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        for row_idx, row in enumerate(table.rows):
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    p.paragraph_format.space_after = Pt(0)
+                    for r in p.runs:
+                        r.font.size = Pt(9)
+                        if header and row_idx == 0:
+                            r.bold = True
+                if header and row_idx == 0:
+                    cell._tc.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="F2F2F2"/>'))
+
+    # Шапка
+    para(company["name"], size=16, bold=True, color=(0x1F, 0x2A, 0x44), space_after=0)
+    contacts = " · ".join(v for v in (company["address"], company["phone"]) if v)
+    if contacts:
+        para(contacts, size=9, color=(0x66, 0x66, 0x66))
+    para(f"ДЕФЕКТОВОЧНЫЙ ЛИСТ к заказ-наряду № {order.id} от {order.created_at.strftime('%d.%m.%Y')}",
+         size=14, bold=True, color=(0x1F, 0x2A, 0x44), space_after=8)
+
+    v = order.vehicle
+    info = [
+        ("Клиент", order.client.full_name if order.client else "—"),
+        ("Телефон", order.client.phone if order.client else "—"),
+        ("Автомобиль", " ".join(x for x in (v.brand, v.model, f"({v.year})" if v.year else "") if x) if v else "—"),
+        ("Гос. номер / VIN", " / ".join(x for x in ((v.plate_number if v else None), (v.vin if v else None)) if x) or "—"),
+        ("Пробег", f"{order.mileage:,} км".replace(",", " ") if order.mileage else "—"),
+    ]
+    t = doc.add_table(rows=0, cols=2)
+    for label, value in info:
+        cells = t.add_row().cells
+        cells[0].text, cells[1].text = label, value
+        cells[0].width, cells[1].width = Cm(5), Cm(20)
+    style_table(t, header=False)
+    for row in t.rows:
+        for r in row.cells[0].paragraphs[0].runs:
+            r.bold = True
+
+    para("", space_after=2)
+    p = para("Жалоба клиента / причина обращения: ", bold=True, space_after=8)
+    p.add_run(order.complaint or "—").bold = False
+
+    # Таблица дефектовки
+    headers = ["№", "Что обнаружено", "Рекомендуемая работа", "Срочность",
+               "Работа", "Запчасти", "Итого", "Согласен", "Отказ"]
+    t = doc.add_table(rows=1, cols=len(headers))
+    for cell, title in zip(t.rows[0].cells, headers):
+        cell.text = title
+    total_all = total_approved = 0.0
+    for n, item in enumerate(defect_items, start=1):
+        parts = item.parts
+        parts_sum = round(sum(p.amount for p in parts), 2)
+        row_total = round(item.amount + parts_sum, 2)
+        total_all += row_total
+        if item.is_approved:
+            total_approved += row_total
+        work = item.work_name + (f" ({item.price_variant})" if item.price_variant else "")
+        if parts:
+            work += "\nЗапчасти: " + ", ".join(
+                f"{p.name} × {str(p.qty).rstrip('0').rstrip('.')}" for p in parts
+            )
+        values = [
+            str(n), item.defect_note or "—", work, URGENCY_LABELS.get(item.urgency, "—"),
+            money(item.amount), money(parts_sum) if parts else "—", money(row_total),
+            "☑" if item.is_approved else "☐",
+            "☑" if item.approval == models.APPROVAL_DECLINED else "☐",
+        ]
+        for cell, value in zip(t.add_row().cells, values):
+            cell.text = value
+    style_table(t)
+    widths = [Cm(0.8), Cm(6), Cm(6.5), Cm(2.4), Cm(2.3), Cm(2.3), Cm(2.4), Cm(1.6), Cm(1.4)]
+    for row in t.rows:
+        for cell, w in zip(row.cells, widths):
+            cell.width = w
+
+    para("", space_after=2)
+    para(f"Итого по дефектовке: {money(total_all)}", bold=True, space_after=2)
+    if any(i.approval != models.APPROVAL_PROPOSED for i in defect_items):
+        para(f"Согласовано клиентом: {money(total_approved)}", bold=True, space_after=2)
+    para("Цены указаны предварительно и могут уточниться после разборки.", size=8,
+         color=(0x88, 0x88, 0x88), space_after=14)
+
+    para("Мастер-приёмщик: ______________________ / ______________________", space_after=10)
+    para("С результатами дефектовки ознакомлен(а), решение по работам принял(а):", space_after=4)
+    para("Клиент: ______________________ / ______________________        Дата: ____________")
+
+    out_path = os.path.join(GENERATED_DIR, f"defect_{order_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx")
+    doc.save(out_path)
+    return FileResponse(
+        out_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"Дефектовочный_лист_№{order_id}.docx",
     )

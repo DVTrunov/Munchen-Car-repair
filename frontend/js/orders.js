@@ -247,10 +247,19 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
   const servicesTotal = order.services_total ?? order.items.reduce((s, i) => s + i.price, 0);
   const partsTotal = order.parts_total ?? (order.parts || []).reduce((s, p) => s + p.price * p.qty, 0);
   const totalAmount = order.total_amount ?? (servicesTotal + partsTotal);
+  // В заказ-наряд и суммы идут только согласованные позиции; дефектовка — отдельная вкладка
+  const works = order.items.filter(i => i.approval === 'approved');
+  const approvedParts = (order.parts || []).filter(p => p.approval === 'approved');
+  const defectItems = order.items.filter(i => i.is_defect);
+  const proposedCount = defectItems.filter(i => i.approval === 'proposed').length;
   const discountTotal = Math.round(
-    order.items.reduce((s, i) => s + i.price - i.amount, 0)
-    + (order.parts || []).reduce((s, p) => s + p.price * p.qty - p.amount, 0)
+    works.reduce((s, i) => s + i.price - i.amount, 0)
+    + approvedParts.reduce((s, p) => s + p.price * p.qty - p.amount, 0)
   );
+  const activeTab = _activeOrderTab.orderId === order.id ? _activeOrderTab.tab
+    : (works.length === 0 && defectItems.length > 0 ? 'defect' : 'works');
+  _activeOrderTab = { orderId: order.id, tab: activeTab };
+  const tabArgs = `${order.id}, '${order.vehicle?.brand || ''}', '${order.vehicle?.model || ''}'`;
 
   App.setContent(`
     <div class="page-header">
@@ -356,6 +365,19 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
                 </div>
               </div>
 
+              <!-- Complaint -->
+              <div class="form-group mb-4">
+                <label>🩺 Жалоба клиента / причина обращения</label>
+                ${order.scoped ? `
+                  <div class="text-sm" style="padding:8px 12px;background:var(--bg-input);border-radius:var(--radius-sm)">${order.complaint ? App.escHtml(order.complaint) : '<span class="text-muted">не указана</span>'}</div>
+                ` : `
+                  <div class="flex gap-2">
+                    <textarea class="form-control" id="input-order-complaint" rows="2"
+                      placeholder="Например: стук спереди справа на неровностях / плановый осмотр">${App.escHtml(order.complaint || '')}</textarea>
+                    <button class="btn btn-secondary" id="btn-save-complaint" style="flex-shrink:0;align-self:flex-start">Сохранить</button>
+                  </div>`}
+              </div>
+
               <!-- Mileage Field -->
               <div class="form-group mb-4">
                 <label style="display:flex;align-items:center;gap:6px">
@@ -424,25 +446,34 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
 
             <!-- Tab navigation -->
             <div class="card-tabs">
-              <div class="card-tab active" id="tab-works" onclick="switchOrderTab('works', ${order.id}, '${order.vehicle?.brand || ''}', '${order.vehicle?.model || ''}')">
-                🔧 ${order.scoped ? 'Мои работы' : 'Работы'} <span style="font-size:11px;opacity:.7">(${order.items.length})</span>
+              <div class="card-tab ${activeTab === 'defect' ? 'active' : ''}" id="tab-defect" onclick="switchOrderTab('defect', ${tabArgs})">
+                🩺 Дефектовка <span style="font-size:11px;opacity:.7">(${defectItems.length})</span>
+                ${proposedCount ? `<span title="Ждут решения клиента" style="background:#f59e0b;color:#000;border-radius:10px;padding:0 6px;font-size:11px;margin-left:2px">${proposedCount}</span>` : ''}
               </div>
-              <div class="card-tab" id="tab-parts" onclick="switchOrderTab('parts', ${order.id}, '${order.vehicle?.brand || ''}', '${order.vehicle?.model || ''}')">
-                🔩 Запчасти и материалы <span style="font-size:11px;opacity:.7">(${(order.parts || []).length})</span>
+              <div class="card-tab ${activeTab === 'works' ? 'active' : ''}" id="tab-works" onclick="switchOrderTab('works', ${tabArgs})">
+                🔧 ${order.scoped ? 'Мои работы' : 'Работы'} <span style="font-size:11px;opacity:.7">(${works.length})</span>
+              </div>
+              <div class="card-tab ${activeTab === 'parts' ? 'active' : ''}" id="tab-parts" onclick="switchOrderTab('parts', ${tabArgs})">
+                🔩 Запчасти и материалы <span style="font-size:11px;opacity:.7">(${approvedParts.length})</span>
               </div>
             </div>
 
+            <!-- Tab: Дефектовка -->
+            <div id="tab-pane-defect" class="tab-pane ${activeTab === 'defect' ? 'active' : ''}">
+              ${_renderDefectList(defectItems, order.parts || [], order.id, order.vehicle?.brand || '', order.vehicle?.model || '', !order.scoped)}
+            </div>
+
             <!-- Tab: Работы -->
-            <div id="tab-pane-works" class="tab-pane active">
+            <div id="tab-pane-works" class="tab-pane ${activeTab === 'works' ? 'active' : ''}">
               <div id="items-wrap">
-                ${_renderItemsTable(order.items, order.id, empMap, order.vehicle?.brand || '', order.vehicle?.model || '')}
+                ${_renderItemsTable(works, order.id, empMap, order.vehicle?.brand || '', order.vehicle?.model || '')}
               </div>
             </div>
 
             <!-- Tab: Запчасти -->
-            <div id="tab-pane-parts" class="tab-pane">
+            <div id="tab-pane-parts" class="tab-pane ${activeTab === 'parts' ? 'active' : ''}">
               <div id="parts-wrap">
-                ${_renderPartsTable(order.parts || [], order.id)}
+                ${_renderPartsTable(approvedParts, order.id)}
               </div>
             </div>
           </div>
@@ -475,7 +506,17 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
   `);
 
   // Set initial tab actions
-  _setTabActions('works', order.id, order.vehicle?.brand || '', order.vehicle?.model || '', order.vehicle);
+  _setTabActions(activeTab, order.id, order.vehicle?.brand || '', order.vehicle?.model || '', order.vehicle);
+
+  document.getElementById('btn-save-complaint')?.addEventListener('click', async () => {
+    const complaint = document.getElementById('input-order-complaint').value.trim() || null;
+    try {
+      await App.api(`/orders/${order.id}`, { method: 'PUT', body: { complaint } });
+      App.toast('Жалоба клиента сохранена');
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
+  });
 
   // Event handlers
   document.getElementById('btn-save-status').addEventListener('click', async () => {
@@ -518,7 +559,11 @@ function _renderOrderDetailHtml(order, clients, vehicles, employees) {
 }
 
 // ─── Tab switching ────────────────────────────────────────────────────────────
+// Активная вкладка заказа — чтобы после сохранения позиции не перескакивать на «Работы»
+let _activeOrderTab = { orderId: null, tab: 'works' };
+
 function switchOrderTab(tab, orderId, brand, model) {
+  _activeOrderTab = { orderId, tab };
   // Toggle tabs
   document.querySelectorAll('.card-tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
@@ -538,16 +583,27 @@ function _setTabActions(tab, orderId, brand, model, vehicle) {
   // Скидки меняют деньги — механику с видимостью «только свои работы» недоступны
   const canBulk = !Permissions.isOrderScoped();
 
-  if (tab === 'works') {
+  if (tab === 'defect') {
+    actionsEl.innerHTML = `
+      ${canBulk ? `
+      <button class="btn btn-sm btn-secondary" onclick="downloadDefectSheet(${orderId})" title="Дефектовочный лист для клиента (DOCX)">📋 Дефектовочный лист</button>
+      <button class="btn btn-sm btn-secondary" onclick="setAllProposed(${orderId}, 'approved')" title="Согласовать все позиции, ожидающие решения">✓ Согласовать всё</button>
+      <button class="btn btn-sm btn-secondary" onclick="setAllProposed(${orderId}, 'declined')" title="Отказ по всем позициям, ожидающим решения">✕ Отказ от остального</button>` : ''}
+      <button class="btn btn-sm btn-primary" onclick="showItemModal(${orderId}, null, '${brand}', '${model}', 'defect')">
+        + Добавить в дефектовку
+      </button>
+    `;
+  } else if (tab === 'works') {
     actionsEl.innerHTML = `
       ${vehicle ? `
       <button class="btn btn-sm btn-secondary" onclick="recalcOrderPrices(${orderId})" title="Пересчитать цены позиций из справочника под текущий автомобиль">
         ↻ Пересчитать цены
       </button>` : ''}
       ${canBulk ? `<button class="btn btn-sm btn-secondary" onclick="showBulkDiscountModal(${orderId}, 'items')" title="Одна скидка на все работы">% Скидка на все</button>` : ''}
+      ${canBulk ? `
       <button class="btn btn-sm btn-primary" onclick="showItemModal(${orderId}, null, '${brand}', '${model}')">
         + Добавить работу
-      </button>
+      </button>` : ''}
     `;
   } else {
     actionsEl.innerHTML = `
@@ -556,6 +612,142 @@ function _setTabActions(tab, orderId, brand, model, vehicle) {
         + Добавить запчасть
       </button>
     `;
+  }
+}
+
+// ─── Defect (Дефектовка) ──────────────────────────────────────────────────────
+const URGENCY_OPTIONS = [
+  { value: 'urgent',      label: 'Срочно',        color: '#ef4444' },
+  { value: 'recommended', label: 'Рекомендуется', color: '#f59e0b' },
+  { value: 'later',       label: 'Можно позже',   color: '#9ca3af' },
+];
+
+const APPROVAL_BADGES = {
+  proposed: '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b">Ждёт решения</span>',
+  approved: '<span class="badge" style="background:rgba(72,187,120,0.15);color:#48bb78">Согласовано</span>',
+  declined: '<span class="badge" style="background:rgba(239,68,68,0.15);color:#fca5a5">Отказ</span>',
+};
+
+function _urgencyBadge(urgency) {
+  const u = URGENCY_OPTIONS.find(o => o.value === urgency);
+  return u ? `<span class="badge" style="background:transparent;border:1px solid ${u.color};color:${u.color}">${u.label}</span>` : '';
+}
+
+/**
+ * Вкладка «Дефектовка»: найденные при осмотре работы с ценами и запчастями.
+ * canDecide — менеджер/владелец: отмечает решение клиента и добавляет запчасти.
+ */
+function _renderDefectList(items, parts, orderId, brand, model, canDecide) {
+  if (!items.length) {
+    return `<div class="empty-state" style="padding:30px">
+      <p class="text-muted">Дефектовки пока нет. Механик добавляет найденное при осмотре кнопкой «+ Добавить в дефектовку» —
+      менеджер согласует позиции с клиентом, и согласованные появятся на вкладке «Работы».</p>
+    </div>`;
+  }
+  const sumOf = list => list.reduce((s, i) => s + i.amount + parts.filter(p => p.item_id === i.id).reduce((a, p) => a + p.amount, 0), 0);
+  const byApproval = a => items.filter(i => i.approval === a);
+
+  return `
+    <div class="defect-list">
+      ${items.map(item => {
+        const itemParts = parts.filter(p => p.item_id === item.id);
+        const declined = item.approval === 'declined';
+        return `
+        <div class="defect-card ${declined ? 'is-declined' : ''}">
+          <div class="defect-card-head">
+            <div style="min-width:0">
+              <div class="defect-card-title">${App.escHtml(item.work_name)}${item.price_variant ? ` <span class="text-muted text-sm" style="font-weight:400">· ${App.escHtml(item.price_variant)}</span>` : ''}</div>
+              ${item.defect_note ? `<div class="text-sm" style="margin-top:2px">🔎 ${App.escHtml(item.defect_note)}</div>` : ''}
+              <div class="flex gap-2" style="flex-wrap:wrap;margin-top:6px;align-items:center">
+                ${APPROVAL_BADGES[item.approval] || ''} ${_urgencyBadge(item.urgency)}
+                <span class="text-sm text-muted">👤 ${item.employee ? App.escHtml(item.employee.full_name) : 'не назначен'}</span>
+              </div>
+            </div>
+            <div class="defect-card-price">${_amountHtml(item.amount, item.price, item.discount)}</div>
+          </div>
+
+          ${itemParts.length || canDecide ? `
+          <div class="defect-card-parts">
+            ${itemParts.map(p => `
+              <div class="defect-part-row">
+                <span>🔩 ${App.escHtml(p.name)} <span class="text-muted">× ${+p.qty}</span></span>
+                <span class="flex gap-2" style="align-items:center">
+                  <strong>${App.formatMoney(p.amount)}</strong>
+                  ${canDecide ? `
+                    <button class="btn btn-sm btn-ghost" onclick="showPartModal(${orderId}, ${p.id})" title="Изменить">✏️</button>
+                    <button class="btn btn-sm btn-ghost" onclick="deletePart(${orderId}, ${p.id})" title="Удалить">✕</button>` : ''}
+                </span>
+              </div>`).join('')}
+            ${canDecide && !declined ? `<button class="btn btn-sm btn-ghost" onclick="showPartModal(${orderId}, null, ${item.id})">+ запчасть к этой работе</button>` : ''}
+          </div>` : ''}
+
+          <div class="defect-card-actions">
+            ${canDecide ? (item.approval === 'proposed' ? `
+              <button class="btn btn-sm btn-primary" onclick="setItemApproval(${orderId}, ${item.id}, 'approved')">✓ Согласовано</button>
+              <button class="btn btn-sm btn-secondary" onclick="setItemApproval(${orderId}, ${item.id}, 'declined')">✕ Отказ</button>
+            ` : `
+              <button class="btn btn-sm btn-ghost" onclick="setItemApproval(${orderId}, ${item.id}, 'proposed')" title="Вернуть на согласование">↺ Вернуть на согласование</button>
+            `) : ''}
+            ${canDecide || item.approval === 'proposed' ? `
+              <button class="btn btn-sm btn-secondary" onclick="showItemModal(${orderId}, ${item.id}, '${brand}', '${model}', 'defect')">✏️ Изм.</button>
+              <button class="btn btn-sm btn-danger" onclick="deleteItem(${orderId}, ${item.id})">✕</button>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+
+      <div class="defect-summary">
+        <span>Всего по дефектовке: <strong>${App.formatMoney(sumOf(items))}</strong></span>
+        ${byApproval('approved').length ? `<span style="color:#48bb78">Согласовано: <strong>${App.formatMoney(sumOf(byApproval('approved')))}</strong></span>` : ''}
+        ${byApproval('proposed').length ? `<span style="color:#f59e0b">Ждёт решения: <strong>${App.formatMoney(sumOf(byApproval('proposed')))}</strong></span>` : ''}
+        ${byApproval('declined').length ? `<span style="color:#fca5a5">Отказ: <strong>${App.formatMoney(sumOf(byApproval('declined')))}</strong></span>` : ''}
+      </div>
+    </div>`;
+}
+
+async function setItemApproval(orderId, itemId, approval) {
+  try {
+    await App.api(`/orders/${orderId}/items/${itemId}`, { method: 'PUT', body: { approval } });
+    App.toast({ approved: 'Согласовано — работа перенесена во вкладку «Работы»', declined: 'Отмечен отказ клиента', proposed: 'Позиция возвращена на согласование' }[approval]);
+    renderOrderDetail(orderId);
+  } catch (err) {
+    App.toast(err.message, 'error');
+  }
+}
+
+async function setAllProposed(orderId, approval) {
+  const question = approval === 'approved'
+    ? 'Согласовать все позиции дефектовки, которые ждут решения клиента?'
+    : 'Отметить отказ клиента по всем позициям, которые ещё ждут решения?';
+  if (!await App.confirm(question)) return;
+  try {
+    await App.api(`/orders/${orderId}/approval`, { method: 'POST', body: { approval } });
+    App.toast(approval === 'approved' ? 'Все позиции согласованы' : 'Отказ отмечен');
+    renderOrderDetail(orderId);
+  } catch (err) {
+    App.toast(err.message, 'error');
+  }
+}
+
+async function downloadDefectSheet(orderId) {
+  try {
+    App.toast('Формируется дефектовочный лист…');
+    const resp = await fetch(`/api/print-templates/defect-sheet/${orderId}`, {
+      headers: { Authorization: `Bearer ${App.token}` },
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(err.detail || 'Ошибка формирования');
+    }
+    const url = URL.createObjectURL(await resp.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Дефектовочный_лист_№${orderId}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    App.toast(err.message, 'error');
   }
 }
 
@@ -599,7 +791,6 @@ function showBulkDiscountModal(orderId, target) {
         App.closeModal();
         App.toast(discount ? `Скидка ${discount}% применена` : 'Скидка убрана');
         await renderOrderDetail(orderId);
-        if (!isItems) setTimeout(() => switchOrderTab('parts', orderId, '', ''), 50);
       } catch (err) {
         App.toast(err.message, 'error');
       }
@@ -760,7 +951,8 @@ function _updatePartSumPreview() {
     'Сумма: ' + App.formatMoney(price * qty * (1 - discount / 100));
 }
 
-async function showPartModal(orderId, partId = null) {
+/** itemId — привязать новую запчасть к работе (дефектовка): она наследует решение клиента по работе */
+async function showPartModal(orderId, partId = null, itemId = null) {
   const scoped = Permissions.isOrderScoped();
   let part = null;
   if (partId) {
@@ -771,7 +963,7 @@ async function showPartModal(orderId, partId = null) {
   }
 
   App.openModal({
-    title: part ? 'Редактировать запчасть' : 'Добавить запчасть / материал',
+    title: part ? 'Редактировать запчасть' : (itemId ? 'Запчасть к работе из дефектовки' : 'Добавить запчасть / материал'),
     body: `
       <form id="part-form">
         <div class="form-group">
@@ -819,6 +1011,7 @@ async function showPartModal(orderId, partId = null) {
       const data = App.formData('part-form');
       data.price = parseFloat(data.price) || 0;
       data.qty = parseFloat(data.qty) || 1;
+      if (!partId && itemId) data.item_id = itemId;
       if ('discount' in data) data.discount = parseFloat(data.discount) || 0;
 
       try {
@@ -831,10 +1024,6 @@ async function showPartModal(orderId, partId = null) {
         }
         App.closeModal();
         await renderOrderDetail(orderId);
-        // Switch to parts tab after add
-        if (!partId) {
-          setTimeout(() => switchOrderTab('parts', orderId, '', ''), 50);
-        }
       } catch (err) {
         App.toast(err.message, 'error');
       }
@@ -848,7 +1037,6 @@ async function deletePart(orderId, partId) {
     await App.api(`/orders/${orderId}/parts/${partId}`, { method: 'DELETE' });
     App.toast('Запчасть удалена');
     await renderOrderDetail(orderId);
-    setTimeout(() => switchOrderTab('parts', orderId, '', ''), 50);
   } catch (err) {
     App.toast(err.message, 'error');
   }
@@ -1285,7 +1473,8 @@ async function onInlineVehBrandChanged(brandName) {
 
 // ─── Order Item Modal with Service Catalog & Auto-Pricing ─────────────────────
 
-async function showItemModal(orderId, itemId = null, brand = '', model = '') {
+/** mode='defect' — позиция дефектовки: «что найдено», срочность, ждёт согласования с клиентом */
+async function showItemModal(orderId, itemId = null, brand = '', model = '', mode = 'work') {
   let employees = [], services = [], item = null;
   const scoped = Permissions.isOrderScoped();
   try {
@@ -1303,8 +1492,12 @@ async function showItemModal(orderId, itemId = null, brand = '', model = '') {
     }
   } catch {}
 
+  const isDefect = mode === 'defect' || !!item?.is_defect;
+
   App.openModal({
-    title: item ? 'Редактировать позицию' : 'Добавить работу из справочника',
+    title: isDefect
+      ? (item ? 'Позиция дефектовки' : 'Добавить в дефектовку')
+      : (item ? 'Редактировать позицию' : 'Добавить работу из справочника'),
     body: `
       <form id="item-form">
         <input type="hidden" name="service_id" id="item-service-id" value="${item?.service_id || ''}" />
@@ -1324,7 +1517,7 @@ async function showItemModal(orderId, itemId = null, brand = '', model = '') {
         </div>
 
         <div class="form-group">
-          <label>Наименование работы <span class="required">*</span></label>
+          <label>${isDefect ? 'Рекомендуемая работа' : 'Наименование работы'} <span class="required">*</span></label>
           <input name="work_name" id="item-work-name" class="form-control" required
             value="${item ? App.escHtml(item.work_name) : ''}"
             placeholder="Замена масла, тормозные колодки…" />
@@ -1369,7 +1562,21 @@ async function showItemModal(orderId, itemId = null, brand = '', model = '') {
           </div>`}
         </div>
 
-        ${item ? `
+        ${isDefect ? `
+        <div class="form-group">
+          <label>Что обнаружено при осмотре</label>
+          <textarea name="defect_note" class="form-control" rows="2"
+            placeholder="Например: люфт правой рулевой тяги, износ колодок 2 мм">${App.escHtml(item?.defect_note || '')}</textarea>
+        </div>
+        <div class="form-group">
+          <label>Срочность</label>
+          <select name="urgency" class="form-control">
+            <option value="">— не указана —</option>
+            ${URGENCY_OPTIONS.map(u => `<option value="${u.value}" ${item?.urgency === u.value ? 'selected' : ''}>${u.label}</option>`).join('')}
+          </select>
+        </div>` : ''}
+
+        ${item && item.approval === 'approved' ? `
         <div class="form-group">
           <label>Статус</label>
           <select name="status" class="form-control">
@@ -1391,6 +1598,12 @@ async function showItemModal(orderId, itemId = null, brand = '', model = '') {
       }
       data.service_id = data.service_id ? parseInt(data.service_id) : null;
       data.price_variant = data.service_id ? (data.price_variant || null) : null;
+      if (isDefect) {
+        data.defect_note = data.defect_note || null;
+        data.urgency = data.urgency || null;
+        // Новая позиция дефектовки ждёт решения клиента
+        if (!itemId) Object.assign(data, { is_defect: true, approval: 'proposed' });
+      }
 
       try {
         if (itemId) {
@@ -1398,7 +1611,7 @@ async function showItemModal(orderId, itemId = null, brand = '', model = '') {
           App.toast('Позиция обновлена');
         } else {
           await App.api(`/orders/${orderId}/items`, { method: 'POST', body: data });
-          App.toast('Работа добавлена');
+          App.toast(isDefect ? 'Добавлено в дефектовку — ждёт согласования с клиентом' : 'Работа добавлена');
         }
         App.closeModal();
         renderOrderDetail(orderId);

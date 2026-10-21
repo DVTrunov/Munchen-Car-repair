@@ -161,7 +161,10 @@ def get_employee_workload(
 
     items = (
         db.query(models.OrderItem)
-        .filter(models.OrderItem.employee_id == employee_id)
+        .filter(
+            models.OrderItem.employee_id == employee_id,
+            models.OrderItem.approval == models.APPROVAL_APPROVED,  # дефектовка и отказы не оплачиваются
+        )
         .all()
     )
     total_amount = round(sum(item.amount for item in items), 2)
@@ -224,6 +227,7 @@ def get_employee_report(
         .join(models.Order, models.OrderItem.order_id == models.Order.id)
         .filter(
             models.OrderItem.employee_id == employee.id,
+            models.OrderItem.approval == models.APPROVAL_APPROVED,
             models.OrderItem.status == models.OrderItemStatus.done,
             done_at >= start,
             done_at <= end,
@@ -235,6 +239,7 @@ def get_employee_report(
         db.query(models.OrderItem)
         .filter(
             models.OrderItem.employee_id == employee.id,
+            models.OrderItem.approval == models.APPROVAL_APPROVED,
             models.OrderItem.status != models.OrderItemStatus.done,
         )
         .all()
